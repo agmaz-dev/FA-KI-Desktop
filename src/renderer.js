@@ -81,7 +81,7 @@ async function refreshStatus() {
   box.classList.toggle('ok', s.ok);
   box.classList.toggle('bad', !s.ok);
   $('statusText').textContent = s.ok ? `Ollama ${s.version} läuft lokal` : 'Ollama nicht erreichbar';
-  if (!s.ok) hint('Ollama ist nicht erreichbar. Bitte die Ollama-App starten (sie läuft im Hintergrund).', 0);
+  if (!s.ok) hint('Ollama ist nicht erreichbar. Die App versucht es zu starten; sonst bitte die Ollama-App öffnen.', 0);
   return s.ok;
 }
 
@@ -306,7 +306,11 @@ function fillMsg(wrap, m, live = false, isLast = false) {
     cp.onclick = () => { navigator.clipboard.writeText(m.content); cp.innerHTML = icon('check'); setTimeout(() => { cp.innerHTML = icon('copy'); }, 1500); };
     const sp = iconButton('speaker', 'Vorlesen');
     sp.onclick = () => speakNow(m.content);
-    ac.append(cp, sp);
+    const pdfB = el('button', 'txt-btn', 'PDF'); pdfB.title = 'Als PDF speichern';
+    pdfB.onclick = () => saveText(m.content, 'pdf');
+    const docB = el('button', 'txt-btn', 'Word'); docB.title = 'Als Word-Datei speichern';
+    docB.onclick = () => saveText(m.content, 'docx');
+    ac.append(cp, sp, pdfB, docB);
     if (isLast) {
       const rg = iconButton('refresh', 'Antwort neu erzeugen');
       rg.onclick = regenerate;
@@ -324,7 +328,7 @@ function setBusy(on) {
 
 function systemText() {
   const s = state.settings;
-  const parts = [];
+  const parts = ['Du bist "FA KI", der persönliche KI-Assistent in der Desktop-App "FA KI Desktop". Du läufst lokal auf dem Computer des Nutzers; seine Daten verlassen den Computer nicht. Wenn jemand fragt, wer du bist, sage das und nenne dich nicht ChatGPT, Claude oder anders.'];
   if (s.systemPrompt && s.systemPrompt.trim()) parts.push(s.systemPrompt.trim());
   const pp = profilePrompt(activeProfile());
   if (pp) parts.push(pp);
@@ -691,10 +695,18 @@ function showSettings(tab) {
 }
 
 // ---------- Export ----------
+async function saveText(markdown, format) {
+  try {
+    const title = (state.chat && state.chat.title) || 'Antwort';
+    const r = await api.chats.export({ title, markdown, format });
+    if (r) hint('Gespeichert: ' + r);
+  } catch (e) { hint('Speichern fehlgeschlagen: ' + (e.message || e)); }
+}
+
 async function exportChat() {
   if (!state.chat || !state.chat.messages.length) return hint('Dieser Chat ist noch leer.');
   const md = `# ${state.chat.title}\n\n` + state.chat.messages.map((m) => `**${m.role === 'user' ? 'Du' : 'KI'}:**\n\n${m.content}`).join('\n\n---\n\n');
-  if (await api.chats.export({ title: state.chat.title, markdown: md })) hint('Chat gespeichert.');
+  await saveText(md, 'pdf');
 }
 
 // ---------- Eingabe ----------
@@ -791,6 +803,8 @@ async function init() {
   renderTtsButton();
   if (state.settings.sidebarOpen === false) toggleSidebar(false);
   wire();
+  api.app.onOllamaStart((r) => { if (r && r.started) { hint('Ollama wurde automatisch gestartet.'); refreshStatus().then(loadModels).catch(() => {}); } else if (r && !r.ok) hint('Ollama ließ sich nicht automatisch starten: ' + (r.error || ''), 0); });
+  api.app.onTtsStart((r) => { if (r && r.started) hint('Stimmen-Server wurde gestartet.'); else if (r && !r.ok) hint('Stimmen-Server: ' + (r.error || 'nicht gestartet'), 0); });
   state.chat = newChat();
   await refreshStatus();
   await loadModels();

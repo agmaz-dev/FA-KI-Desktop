@@ -122,6 +122,9 @@ export async function openSettings(ctx, startTab = 'general') {
     const ur = formRow('Adresse von Ollama', url, 'Standard: http://127.0.0.1:11434 (bleibt auf diesem PC).');
     ur.style.marginTop = '16px';
     body.appendChild(ur);
+    const ao = switchRow('Ollama mit der App starten', 'Startet Ollama im Hintergrund, falls es nicht läuft (nur bei einer Adresse auf diesem PC).', draft.autoStartOllama);
+    bind(ao.cb, 'autoStartOllama');
+    body.appendChild(ao.row);
   }
 
   // ---------- KI ----------
@@ -235,6 +238,37 @@ export async function openSettings(ctx, startTab = 'general') {
         res.textContent = r.ok ? (r.voices.length ? 'Verbunden. Gefundene Stimmen: ' + r.voices.slice(0, 12).join(', ') : 'Verbunden (keine Stimmenliste gefunden, Namen von Hand eintragen).') : 'Nicht erreichbar. Läuft der Stimmen-Server?';
       };
       sv.append(chk, res);
+      const sampleRow = el('div', 'form-row');
+      sampleRow.appendChild(el('label', null, 'Meine Stimmprobe'));
+      const sampleInfo = el('div', 'note', draft.ttsSampleFile ? 'Gewählt: ' + draft.ttsSampleFile : 'Noch keine Probe gewählt. Eine saubere Aufnahme von 10 bis 20 Sekunden (WAV) genügt.');
+      const pick = el('button', 'btn small', 'Aufnahme wählen …');
+      pick.onclick = async () => {
+        const r = await api.speech.pickSample();
+        if (!r) return;
+        draft.ttsSampleFile = r.name;
+        sampleInfo.textContent = 'Gewählt: ' + r.name + '. ' + r.notes.join(' ');
+      };
+      sampleRow.append(pick, sampleInfo);
+      sv.appendChild(sampleRow);
+      const dirIn = bind(input('text', draft.ttsServerDir, { placeholder: 'z. B. C:\\Chatterbox-TTS-Server' }), 'ttsServerDir');
+      const dirRow = formRow('Ordner des Stimmen-Servers', dirIn, 'Wird für den automatischen Start und zum Ablegen der Stimmprobe genutzt.');
+      const dirPick = el('button', 'btn small', 'Ordner wählen …');
+      dirPick.onclick = async () => { const f = await api.app.pickFolder(); if (f) { draft.ttsServerDir = f; dirIn.value = f; } };
+      dirRow.appendChild(dirPick);
+      sv.appendChild(dirRow);
+      sv.appendChild(formRow('Startbefehl', bind(input('text', draft.ttsServerCmd, { placeholder: 'python server.py' }), 'ttsServerCmd'), 'Wird im Ordner oben ausgeführt.'));
+      const au = switchRow('Stimmen-Server mit der App starten', 'Startet den Server beim Öffnen der App im Hintergrund und beendet ihn beim Schließen.', draft.ttsServerAuto);
+      bind(au.cb, 'ttsServerAuto');
+      sv.appendChild(au.row);
+      const startNow = el('button', 'btn small', 'Server jetzt starten');
+      const startRes = el('div', 'note', '');
+      startNow.onclick = async () => {
+        startRes.textContent = 'Starte … (das erste Laden kann eine Minute dauern)';
+        await api.settings.set({ ttsServerDir: draft.ttsServerDir, ttsServerCmd: draft.ttsServerCmd, ttsServerUrl: draft.ttsServerUrl });
+        const r = await api.speech.startServer();
+        startRes.textContent = r.ok ? (r.started ? 'Server läuft jetzt.' : 'Server lief schon.') : 'Fehler: ' + r.error;
+      };
+      sv.append(startNow, startRes);
       sv.style.marginBottom = '12px';
       body.appendChild(sv);
     }

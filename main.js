@@ -6,6 +6,8 @@ const { Store } = require('./lib/store');
 const ollama = require('./lib/ollama');
 const { SpeechManager } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
+const { Procs } = require('./lib/procs');
+const { renderPdf, buildDocx } = require('./lib/export');
 
 let win = null;
 let store = null;
@@ -13,6 +15,7 @@ let speech = null;
 const chatControllers = new Map();
 let pullController = null;
 let ocrWorker = null;
+const procs = new Procs();
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -64,6 +67,11 @@ if (!gotLock) {
 
     registerIpc();
     createWindow();
+    const st = store.getSettings();
+    if (st.autoStartOllama && /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(st.ollamaUrl)) {
+      procs.ensureOllama(st.ollamaUrl).then((r) => send('app:ollamaStart', r)).catch(() => {});
+    }
+    if (st.ttsServerAuto && st.ttsEngine === 'server') procs.ensureTtsServer(st).then((r) => send('app:ttsStart', r)).catch(() => {});
   });
   app.on('window-all-closed', () => app.quit());
 }
@@ -79,14 +87,25 @@ function registerIpc() {
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
   ipcMain.handle('chats:delete', (_e, id) => store.deleteChat(id));
   ipcMain.handle('chats:clear', () => store.clearChats());
-  ipcMain.handle('chats:export', async (_e, { title, markdown }) => {
+  ipcMain.handle('chats:export', async (_e, { title, markdown, format }) => {
+    const safe = (title || 'Dokument').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+    const all = {
+      pdf: { name: 'PDF-Dokument', extensions: ['pdf'] },
+      docx: { name: 'Word-Dokument', extensions: ['docx'] },
+      md: { name: 'Markdown', extensions: ['md'] },
+    };
+    const first = all[format] ? format : 'pdf';
+    const order = [first, ...Object.keys(all).filter((k) => k !== first)];
     const r = await dialog.showSaveDialog(win, {
-      defaultPath: (title || 'Chat').replace(/[\\/:*?"<>|]/g, '_') + '.md',
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
+      defaultPath: safe + '.' + first,
+      filters: order.map((k) => all[k]),
     });
     if (r.canceled || !r.filePath) return false;
-    fs.writeFileSync(r.filePath, markdown, 'utf8');
-    return true;
+    const ext = path.extname(r.filePath).slice(1).toLowerCase();
+    if (ext === 'pdf') fs.writeFileSync(r.filePath, await renderPdf(BrowserWindow, markdown, title));
+    else if (ext === 'docx') fs.writeFileSync(r.filePath, buildDocx(markdown, title));
+    else fs.writeFileSync(r.filePath, markdown, 'utf8');
+    return r.filePath;
   });
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), dataDir: app.getPath('userData') }));
   ipcMain.handle('app:openDataDir', () => shell.openPath(app.getPath('userData')));
@@ -186,6 +205,36 @@ function registerIpc() {
     return speech.synthesize(text, voice, speed);
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
+  ipcMain.handle('speech:startServer', () => procs.ensureTtsServer(store.getSettings()));
+  ipcMain.handle('speech:pickSample', async () => {
+    const r = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Sprachaufnahme', extensions: ['wav', 'mp3', 'flac', 'ogg'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const s = store.getSettings();
+    const name = path.basename(r.filePaths[0]).replace(/[^A-Za-z0-9._-]/g, '_');
+    const keep = path.join(app.getPath('userData'), 'voices');
+    fs.mkdirSync(keep, { recursive: true });
+    fs.copyFileSync(r.filePaths[0], path.join(keep, name));
+    const notes = ['Gespeichert in den App-Daten.'];
+    // In den Ordner des Stimmen-Servers kopieren, damit er die Probe findet.
+    if (s.ttsServerDir && fs.existsSync(s.ttsServerDir)) {
+      try {
+        const refDir = path.join(s.ttsServerDir, 'reference_audio');
+        fs.mkdirSync(refDir, { recursive: true });
+        fs.copyFileSync(r.filePaths[0], path.join(refDir, name));
+        notes.push('In den Ordner reference_audio des Stimmen-Servers kopiert.');
+      } catch (e) { notes.push('Kopieren in den Server-Ordner fehlgeschlagen: ' + e.message); }
+    }
+    store.setSettings({ ttsSampleFile: name });
+    return { name, notes };
+  });
+  ipcMain.handle('dialog:pickFolder', async () => {
+    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle('ollama:ensure', () => procs.ensureOllama(base()));
 }
 
 async function ensureTessData() {
@@ -227,5 +276,6 @@ async function getOcrWorker() {
 }
 
 app.on('before-quit', () => {
+  procs.killAll();
   if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
 });

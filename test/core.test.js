@@ -134,3 +134,15 @@ test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
   assert.strictEqual(sm.installedVoice('tr').id, 'tr_TR-dfki-medium');
   assert.strictEqual(sm.installedVoice('de').id, 'de_DE-thorsten-high');
 });
+
+test('Word-Export erzeugt gültiges DOCX-Paket', () => {
+  const { buildDocx } = require('../lib/export');
+  const AdmZip = require('adm-zip');
+  const z = new AdmZip(buildDocx('# Titel\n\nText **fett** & <b>x</b>\n\n- eins\n- zwei\n', 'T'));
+  const names = z.getEntries().map((e) => e.entryName);
+  for (const n of ['[Content_Types].xml', 'word/document.xml', 'word/styles.xml']) assert.ok(names.includes(n), n);
+  const xml = z.readAsText('word/document.xml');
+  assert.match(xml, /Heading1/);
+  assert.match(xml, /&lt;b&gt;/);
+  assert.ok(!/<b>x/.test(xml));
+});

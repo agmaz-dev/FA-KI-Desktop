@@ -14,10 +14,13 @@ contextBridge.exposeInMainWorld('api', {
     list: inv('chats:list'), load: inv('chats:load'), save: inv('chats:save'),
     remove: inv('chats:delete'), export: inv('chats:export'), clear: inv('chats:clear'),
   },
-  app: { info: inv('app:info'), openDataDir: inv('app:openDataDir') },
+  app: {
+    info: inv('app:info'), openDataDir: inv('app:openDataDir'), pickFolder: inv('dialog:pickFolder'),
+    onOllamaStart: on('app:ollamaStart'), onTtsStart: on('app:ttsStart'),
+  },
   files: { pick: inv('files:pick') },
   ollama: {
-    status: inv('ollama:status'), models: inv('ollama:models'), show: inv('ollama:show'),
+    ensure: inv('ollama:ensure'), status: inv('ollama:status'), models: inv('ollama:models'), show: inv('ollama:show'),
     remove: inv('ollama:delete'), pull: inv('ollama:pull'), pullCancel: inv('ollama:pullCancel'),
     onPull: on('ollama:pullProgress'),
   },
@@ -29,6 +32,7 @@ contextBridge.exposeInMainWorld('api', {
   speech: {
     status: inv('speech:status'), prepareStt: inv('speech:prepareStt'), prepareTts: inv('speech:prepareTts'),
     abort: inv('speech:abort'), transcribe: inv('speech:transcribe'), synthesize: inv('speech:synthesize'), serverVoices: inv('speech:serverVoices'),
+    startServer: inv('speech:startServer'), pickSample: inv('speech:pickSample'),
     onProgress: on('speech:progress'),
   },
 });
