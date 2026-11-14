@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:; worker-src 'self' blob:; connect-src 'self' blob: data:; object-src 'none'">
+<title>FA KI Desktop</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand"><span class="logo">FA</span><span>KI Desktop</span></div>
+    <button id="newChat" class="primary wide">＋ Neuer Chat</button>
+    <div id="chatList" class="chat-list"></div>
+    <div class="side-foot">
+      <button id="btnModels" class="ghost wide">Modelle verwalten</button>
+      <button id="btnSettings" class="ghost wide">Einstellungen</button>
+      <div id="status" class="status"><span class="dot"></span><span id="statusText">Verbinde …</span></div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <div class="field">
+        <label for="modelSel">Modell</label>
+        <select id="modelSel"></select>
+      </div>
+      <div class="field" id="thinkField">
+        <label for="thinkSel">Denktiefe</label>
+        <select id="thinkSel">
+          <option value="low">Niedrig</option>
+          <option value="medium">Mittel</option>
+          <option value="high">Hoch</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tplSel">E-Mail-Hilfe</label>
+        <select id="tplSel">
+          <option value="">Vorlage wählen …</option>
+          <option value="reply_de">Antwort auf Deutsch entwerfen</option>
+          <option value="reply_tr">Antwort auf Türkisch entwerfen</option>
+          <option value="summary">E-Mail zusammenfassen</option>
+          <option value="formal">Höflich/formell umschreiben</option>
+          <option value="translate_de">Ins Deutsche übersetzen</option>
+          <option value="translate_tr">Ins Türkische übersetzen</option>
+        </select>
+      </div>
+      <div class="spacer"></div>
+      <label class="check"><input type="checkbox" id="ttsAuto"> Antworten vorlesen</label>
+      <button id="btnStopSpeak" class="ghost small hidden">⏹ Vorlesen stoppen</button>
+      <button id="btnExport" class="ghost small">Exportieren</button>
+    </header>
+
+    <div id="messages" class="messages">
+      <div id="empty" class="empty">
+        <div class="logo big">FA</div>
+        <h1>Deine private KI</h1>
+        <p>Alles läuft lokal auf diesem PC. Deine Chats und Dateien verlassen den Rechner nicht.</p>
+      </div>
+    </div>
+
+    <div id="progressBar" class="progress hidden"><div class="progress-text" id="progressText"></div><div class="bar"><div id="progressFill"></div></div></div>
+
+    <footer id="composer">
+      <div id="attachments" class="attachments"></div>
+      <div class="row">
+        <button id="btnAttach" class="icon" title="PDF, Bild oder Textdatei anhängen">📎</button>
+        <button id="btnMic" class="icon" title="Diktieren (Klick zum Starten/Beenden)">🎤</button>
+        <button id="btnConv" class="icon" title="Gesprächsmodus: sprechen, Antwort wird vorgelesen, dann hört die KI wieder zu">🗣</button>
+        <textarea id="input" rows="1" placeholder="Nachricht schreiben … (Enter = senden, Umschalt+Enter = neue Zeile)"></textarea>
+        <button id="btnSend" class="primary">Senden</button>
+        <button id="btnStop" class="danger hidden">Stopp</button>
+      </div>
+      <div id="hint" class="hint"></div>
+    </footer>
+  </main>
+</div>
+
+<div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
+<script src="renderer.js"></script>
+</body>
+</html>
