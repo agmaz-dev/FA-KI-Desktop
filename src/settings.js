@@ -52,8 +52,19 @@ export async function openSettings(ctx, startTab = 'general') {
   const api = ctx.api;
   const [info] = await Promise.all([api.app.info()]);
 
+  let vstat = { installed: false, busy: false };
+  const VU = (window.__voiceUi = window.__voiceUi || { text: '', pct: null, running: false, done: '' });
+  if (!window.__voiceSub) {
+    window.__voiceSub = api.voice.onProgress((p) => {
+      VU.text = p.text || ''; VU.pct = p.pct;
+      const t = document.getElementById('voiceProgText'); if (t) t.textContent = VU.text;
+      const f = document.getElementById('voiceProgFill'); if (f) f.style.width = (VU.pct == null ? 5 : VU.pct) + '%';
+    });
+  }
+
   async function render() {
     const st = await api.speech.status();
+    vstat = await api.voice.status();
     openModal((m) => {
       const nav = el('div', 'set-nav');
       nav.appendChild(el('h2', null, 'Einstellungen'));
@@ -221,6 +232,38 @@ export async function openSettings(ctx, startTab = 'general') {
     sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `Tempo: ${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
     const spr = formRow('Sprechtempo', sp); spr.appendChild(spl);
     body.appendChild(spr);
+    const vc = el('div', 'voice-card');
+    vc.appendChild(el('h3', null, 'Eigene Stimme (natürlich, nach Deiner Aufnahme)'));
+    vc.appendChild(el('div', 'note', 'Chatterbox spricht Deutsch und Türkisch und klingt nach Deiner Aufnahme. Die Einrichtung ist einmalig: rund 6 GB Download und Speicherplatz, je nach Leitung 20 bis 60 Minuten. Alles läuft auf diesem PC. Es rechnet auf dem Prozessor, deshalb braucht jeder Satz einige Sekunden.'));
+    const sInfo = el('div', 'note', draft.ttsSampleFile ? 'Stimmprobe: ' + draft.ttsSampleFile : 'Noch keine Stimmprobe gewählt (ohne Probe spricht eine Standardstimme).');
+    const bSample = el('button', 'btn small', 'Aufnahme wählen …');
+    bSample.onclick = async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sInfo.textContent = 'Stimmprobe: ' + r.name; } };
+    const bSetup = el('button', 'btn small primary', vstat.installed ? 'Neu einrichten / reparieren' : 'Stimme jetzt einrichten');
+    const bCancel = el('button', 'btn small', 'Abbrechen');
+    const pt = el('div', 'note', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Eigene Stimme ist installiert.' : '')));
+    pt.id = 'voiceProgText';
+    const bar = el('div', 'bar'); const fill = el('div'); fill.id = 'voiceProgFill'; fill.style.cssText = 'height:100%;background:var(--accent);width:' + (VU.pct == null ? 5 : VU.pct) + '%'; bar.appendChild(fill);
+    bar.style.display = VU.running ? '' : 'none';
+    bCancel.style.display = VU.running ? '' : 'none';
+    bSetup.disabled = VU.running;
+    bCancel.onclick = () => api.voice.cancel();
+    bSetup.onclick = async () => {
+      VU.running = true; VU.done = ''; VU.text = 'Starte …'; VU.pct = 0;
+      await api.settings.set({ ttsSampleFile: draft.ttsSampleFile });
+      render();
+      const r = await api.voice.setup();
+      VU.running = false;
+      if (r.ok) {
+        const fresh = await api.settings.get();
+        Object.assign(draft, { ttsEngine: fresh.ttsEngine, ttsServerUrl: fresh.ttsServerUrl, ttsServerDir: fresh.ttsServerDir, ttsServerCmd: fresh.ttsServerCmd, ttsServerAuto: fresh.ttsServerAuto, ttsServerModel: fresh.ttsServerModel, ttsServerVoice: '', ttsServerVoiceTr: '' });
+        VU.done = `Fertig. Der Testsatz brauchte ${r.seconds.toFixed(1).replace('.', ',')} Sekunden. Klick unten auf „Stimme testen“ und dann auf „Speichern“.`;
+      } else VU.done = 'Fehler: ' + r.error;
+      render();
+    };
+    const vrow = el('div', 'chips-row'); vrow.append(bSample, bSetup, bCancel);
+    vc.append(sInfo, vrow, bar, pt);
+    vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
+    body.appendChild(vc);
     body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (lokal, einfach, solide)'], ['server', 'Eigener Stimmen-Server (beste Qualität)']], draft.ttsEngine), 'ttsEngine'), 'Ein Stimmen-Server (z. B. Chatterbox) klingt viel natürlicher, muss aber separat auf diesem PC laufen. Nutzt eine OpenAI-kompatible Adresse.'));
     if (draft.ttsEngine === 'server') {
       const sv = el('div');

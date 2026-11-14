@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('api', {
     onDelta: on('chat:delta'), onDone: on('chat:done'), onError: on('chat:error'),
   },
   ocr: { run: inv('ocr:run') },
+  voice: { status: inv('voice:status'), setup: inv('voice:setup'), cancel: inv('voice:cancel'), onProgress: on('voice:progress') },
   speech: {
     status: inv('speech:status'), prepareStt: inv('speech:prepareStt'), prepareTts: inv('speech:prepareTts'),
     abort: inv('speech:abort'), transcribe: inv('speech:transcribe'), synthesize: inv('speech:synthesize'), serverVoices: inv('speech:serverVoices'),

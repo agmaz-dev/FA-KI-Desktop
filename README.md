@@ -16,3 +16,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - **Eigene Stimme:** In den Einstellungen unter Sprache den Stimmen-Motor „Eigener Stimmen-Server“ wählen (z. B. Chatterbox), eine eigene Stimmprobe auswählen, Ordner und Startbefehl des Servers eintragen. Die App kann den Server beim Start im Hintergrund starten.
 - **Ollama** wird beim Start automatisch gestartet, falls es nicht läuft (abschaltbar).
 - Die KI stellt sich als „FA KI“ vor.
+
+## Neu in 1.4.0
+- **Eigene Stimme mit einem Klick:** Einstellungen → Sprache → „Stimme jetzt einrichten“. Die App lädt ein portables Python, installiert Chatterbox (Multilingual, Deutsch und Türkisch), startet den Stimmen-Server im Hintergrund und erzeugt einen Testsatz. Eine eigene Stimmprobe (WAV) kann vorher gewählt werden. Der Server liegt in `voice-server/voice_server.py`.

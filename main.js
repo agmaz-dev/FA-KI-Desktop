@@ -8,6 +8,7 @@ const { SpeechManager } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
 const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
+const { VoiceInstaller } = require('./lib/voiceinstall');
 
 let win = null;
 let store = null;
@@ -15,6 +16,7 @@ let speech = null;
 const chatControllers = new Map();
 let pullController = null;
 let ocrWorker = null;
+let voiceInst = null;
 const procs = new Procs();
 
 const send = (ch, payload) => {
@@ -65,6 +67,7 @@ if (!gotLock) {
     });
     session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === 'media');
 
+    voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'voice_server.py'), (p) => send('voice:progress', p));
     registerIpc();
     createWindow();
     const st = store.getSettings();
@@ -233,6 +236,27 @@ function registerIpc() {
   ipcMain.handle('dialog:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle('voice:status', () => voiceInst.status());
+  ipcMain.handle('voice:cancel', () => { voiceInst.cancel(); return true; });
+  ipcMain.handle('voice:setup', async () => {
+    try {
+      const r = await voiceInst.install();
+      const sample = store.getSettings().ttsSampleFile || '';
+      store.setSettings({
+        ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: r.cmd,
+        ttsServerAuto: true, ttsServerModel: 'chatterbox', ttsServerVoice: '', ttsServerVoiceTr: '',
+      });
+      const st = await procs.ensureTtsServer(store.getSettings());
+      if (!st.ok) throw new Error(st.error);
+      await voiceInst.waitReady();
+      send('voice:progress', { text: 'Testsatz wird erzeugt …', pct: 95 });
+      const b = await voiceInst.benchmark(sample);
+      send('voice:progress', { text: 'Fertig.', pct: 100 });
+      return { ok: true, seconds: b.seconds };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
   });
   ipcMain.handle('ollama:ensure', () => procs.ensureOllama(base()));
 }
