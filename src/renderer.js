@@ -467,6 +467,8 @@ async function speakNow(text, settingsOverride) {
       voicePref: s.ttsVoice,
       speechStatus: state.speechStatus,
       speed: s.ttsSpeed || 1,
+      engine: s.ttsEngine || 'piper',
+      onWarn: (m) => hint('Stimmen-Server nicht erreichbar, es spricht die Windows-Stimme: ' + m, 0),
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }

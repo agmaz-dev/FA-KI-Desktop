@@ -180,7 +180,12 @@ function registerIpc() {
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
-  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => speech.synthesize(text, voice, speed));
+  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => {
+    const s = store.getSettings();
+    if (s.ttsEngine === 'server') return speech.synthesizeServer(text, voice, s, speed);
+    return speech.synthesize(text, voice, speed);
+  });
+  ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
 }
 
 async function ensureTessData() {

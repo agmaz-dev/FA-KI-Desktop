@@ -105,3 +105,32 @@ test('Downloader', async () => {
   assert.strictEqual(last.received, 6);
   srv.close();
 });
+
+test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
+  const { SpeechManager } = require('../lib/speech');
+  let got = null;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      if (req.url === '/v1/audio/speech') { got = JSON.parse(b); res.end(Buffer.from('RIFFxxxx')); return; }
+      if (req.url === '/v1/audio/voices') { res.end(JSON.stringify({ voices: ['anna.wav', { name: 'ben.wav' }] })); return; }
+      res.statusCode = 404; res.end('{}');
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-'));
+  const sm = new SpeechManager(dir);
+  const wav = await sm.synthesizeServer('Hallo', 'tr', { ttsServerUrl: url, ttsServerVoice: 'anna.wav', ttsServerVoiceTr: 'ben.wav' }, 1.2);
+  assert.strictEqual(wav.length, 8);
+  assert.strictEqual(got.voice, 'ben.wav'); assert.strictEqual(got.language, 'tr'); assert.strictEqual(got.speed, 1.2);
+  const v = await sm.serverVoices(url);
+  assert.ok(v.ok); assert.deepStrictEqual(v.voices, ['anna.wav', 'ben.wav']);
+  srv.close();
+  fs.mkdirSync(sm.voiceDir, { recursive: true });
+  for (const id of ['tr_TR-fettah-medium', 'tr_TR-dfki-medium', 'de_DE-thorsten-medium', 'de_DE-thorsten-high']) {
+    fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx'), 'x'); fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx.json'), '{}');
+  }
+  assert.strictEqual(sm.installedVoice('tr').id, 'tr_TR-dfki-medium');
+  assert.strictEqual(sm.installedVoice('de').id, 'de_DE-thorsten-high');
+});

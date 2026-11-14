@@ -157,25 +157,29 @@ function playBytes(bytes, token) {
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
  * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
-export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, onState } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', onState, onWarn } = {}) {
   stopSpeaking();
   const token = session;
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const piperOk = voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang];
+  const serverMode = engine === 'server' && voicePref !== 'windows';
+  const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
+  let warned = false;
+  const synth = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed }).catch((e) => {
+    if (!warned && onWarn) { warned = true; onWarn(String((e && e.message) || e)); }
+    return null;
+  });
   const sentences = splitSentences(plain, piperOk ? 300 : 200);
   stateCb = onState || null;
   onState && onState(true);
   try {
     if (piperOk) {
-      let next = window.api.speech.synthesize({ text: sentences[0], voice: lang, speed }).catch(() => null);
+      let next = synth(sentences[0]);
       for (let i = 0; i < sentences.length; i++) {
         const cur = await next;
         if (token !== session) return;
-        next = i + 1 < sentences.length
-          ? window.api.speech.synthesize({ text: sentences[i + 1], voice: lang, speed }).catch(() => null)
-          : null;
+        next = i + 1 < sentences.length ? synth(sentences[i + 1]) : null;
         if (cur) await playBytes(cur, token);
         else await speakWindows(sentences[i], lang, speed, token);
         if (token !== session) return;

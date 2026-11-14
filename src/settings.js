@@ -95,6 +95,8 @@ export async function openSettings(ctx, startTab = 'general') {
     return control;
   };
 
+  const bindRender = (control, key) => { control.addEventListener('change', () => { draft[key] = control.value; render(); }); return control; };
+
   // ---------- Allgemein ----------
   function general(body) {
     body.appendChild(el('h2', null, 'Allgemein'));
@@ -213,6 +215,26 @@ export async function openSettings(ctx, startTab = 'general') {
     sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `Tempo: ${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
     const spr = formRow('Sprechtempo', sp); spr.appendChild(spl);
     body.appendChild(spr);
+    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (lokal, einfach, solide)'], ['server', 'Eigener Stimmen-Server (beste Qualität)']], draft.ttsEngine), 'ttsEngine'), 'Ein Stimmen-Server (z. B. Chatterbox) klingt viel natürlicher, muss aber separat auf diesem PC laufen. Nutzt eine OpenAI-kompatible Adresse.'));
+    if (draft.ttsEngine === 'server') {
+      const sv = el('div');
+      const url = bind(input('text', draft.ttsServerUrl), 'ttsServerUrl');
+      sv.appendChild(formRow('Adresse des Stimmen-Servers', url, 'Standard bei Chatterbox: http://127.0.0.1:8004'));
+      const two2 = el('div', 'two');
+      two2.appendChild(formRow('Stimme (Deutsch)', bind(input('text', draft.ttsServerVoice, { placeholder: 'Name der Stimme' }), 'ttsServerVoice')));
+      two2.appendChild(formRow('Stimme (Türkisch)', bind(input('text', draft.ttsServerVoiceTr, { placeholder: 'leer = wie Deutsch' }), 'ttsServerVoiceTr')));
+      sv.appendChild(two2);
+      const chk = el('button', 'btn small', 'Verbindung prüfen');
+      const res = el('div', 'note', '');
+      chk.onclick = async () => {
+        res.textContent = 'Prüfe …';
+        const r = await api.speech.serverVoices(draft.ttsServerUrl);
+        res.textContent = r.ok ? (r.voices.length ? 'Verbunden. Gefundene Stimmen: ' + r.voices.slice(0, 12).join(', ') : 'Verbunden (keine Stimmenliste gefunden, Namen von Hand eintragen).') : 'Nicht erreichbar. Läuft der Stimmen-Server?';
+      };
+      sv.append(chk, res);
+      sv.style.marginBottom = '12px';
+      body.appendChild(sv);
+    }
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');
@@ -251,7 +273,7 @@ export async function openSettings(ctx, startTab = 'general') {
     const model = draft.sttModel;
     body.appendChild(mkRow('Spracherkennung (Whisper, Modell „' + model + '“)', st.whisperBinary && st.whisperModels[model], 'ca. ' + st.info.whisperModels[model].approx + ' – für Diktieren und Gesprächsmodus', 'Einrichten', () => api.speech.prepareStt(model)));
     for (const k of ['de', 'tr']) {
-      body.appendChild(mkRow('Natürliche Stimme: ' + st.info.voices[k].label, st.piperBinary && st.voices[k], 'ca. ' + st.info.voices[k].approx + ' – klingt natürlicher als die Windows-Stimme', 'Laden', () => api.speech.prepareTts(k)));
+      body.appendChild(mkRow('Piper-Stimme: ' + st.info.voices[k].label, st.piperBinary && st.voices[k], 'ca. ' + st.info.voices[k].approx + ' – klingt natürlicher als die Windows-Stimme', 'Laden', () => api.speech.prepareTts(k)));
     }
   }
 

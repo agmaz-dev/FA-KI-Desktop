@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   ocr: { run: inv('ocr:run') },
   speech: {
     status: inv('speech:status'), prepareStt: inv('speech:prepareStt'), prepareTts: inv('speech:prepareTts'),
-    abort: inv('speech:abort'), transcribe: inv('speech:transcribe'), synthesize: inv('speech:synthesize'),
+    abort: inv('speech:abort'), transcribe: inv('speech:transcribe'), synthesize: inv('speech:synthesize'), serverVoices: inv('speech:serverVoices'),
     onProgress: on('speech:progress'),
   },
 });
