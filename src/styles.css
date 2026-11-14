@@ -101,7 +101,7 @@ select option { background: var(--card); color: var(--text); }
 .msg-actions .icon-btn { width: 30px; height: 30px; }
 details.think { border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px; margin-bottom: 10px; color: var(--muted); font: 13.5px var(--font-sans); background: var(--card); }
 details.think summary { cursor: pointer; }
-details.think .tt { white-space: pre-wrap; margin-top: 6px; }
+details.think .tt { white-space: pre-wrap; margin-top: 6px; max-height: 240px; overflow-y: auto; }
 .stats { font: 12px var(--font-sans); color: var(--muted); margin-top: 6px; }
 .err { color: var(--danger); font-family: var(--font-sans); }
 

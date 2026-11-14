@@ -270,10 +270,19 @@ function fillMsg(wrap, m, live = false, isLast = false) {
   }
   if (m.thinking) {
     const d = el('details', 'think');
-    if (live) d.open = true;
-    d.appendChild(el('summary', null, live && !m.content ? 'Denkt nach …' : 'Gedankengang anzeigen'));
-    d.appendChild(el('div', 'tt', m.thinking));
+    const open = wrap._thinkOpen !== undefined ? wrap._thinkOpen : !!(live && state.settings.thinkLive);
+    d.open = open;
+    d.addEventListener('toggle', () => { wrap._thinkOpen = d.open; });
+    let label = 'Gedankengang anzeigen';
+    if (live && !m.content) {
+      if (!m._t0) m._t0 = Date.now();
+      label = `Denkt nach … (${Math.round((Date.now() - m._t0) / 1000)} s)`;
+    }
+    d.appendChild(el('summary', null, label));
+    const tt = el('div', 'tt', m.thinking);
+    d.appendChild(tt);
     body.appendChild(d);
+    if (open && live) requestAnimationFrame(() => { tt.scrollTop = tt.scrollHeight; });
   }
   const md = el('div', 'md');
   md.innerHTML = renderMd(m.content);
