@@ -9,70 +9,62 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div class="brand"><span class="logo">FA</span><span>KI Desktop</span></div>
-    <button id="newChat" class="primary wide">＋ Neuer Chat</button>
+    <div class="side-top">
+      <div class="brand"><span class="logo">FA</span><span class="brand-name">KI Desktop</span></div>
+      <button id="btnSidebar" class="icon-btn" data-icon="sidebar" title="Seitenleiste ausblenden"></button>
+    </div>
+    <button id="newChat" class="nav-btn accent-text"><span data-icon="plus"></span>Neuer Chat</button>
+    <div class="search"><span data-icon="search" data-size="15"></span><input id="chatSearch" type="text" placeholder="Chats durchsuchen"></div>
     <div id="chatList" class="chat-list"></div>
     <div class="side-foot">
-      <button id="btnModels" class="ghost wide">Modelle verwalten</button>
-      <button id="btnSettings" class="ghost wide">Einstellungen</button>
+      <button id="btnModels" class="nav-btn"><span data-icon="cpu"></span>Modelle verwalten</button>
+      <button id="btnSettings" class="nav-btn"><span data-icon="sliders"></span>Einstellungen</button>
       <div id="status" class="status"><span class="dot"></span><span id="statusText">Verbinde …</span></div>
     </div>
   </aside>
 
   <main id="main">
     <header id="topbar">
-      <div class="field">
-        <label for="modelSel">Modell</label>
-        <select id="modelSel"></select>
-      </div>
-      <div class="field" id="thinkField">
-        <label for="thinkSel">Denktiefe</label>
-        <select id="thinkSel">
-          <option value="low">Niedrig</option>
-          <option value="medium">Mittel</option>
-          <option value="high">Hoch</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="tplSel">E-Mail-Hilfe</label>
-        <select id="tplSel">
-          <option value="">Vorlage wählen …</option>
-          <option value="reply_de">Antwort auf Deutsch entwerfen</option>
-          <option value="reply_tr">Antwort auf Türkisch entwerfen</option>
-          <option value="summary">E-Mail zusammenfassen</option>
-          <option value="formal">Höflich/formell umschreiben</option>
-          <option value="translate_de">Ins Deutsche übersetzen</option>
-          <option value="translate_tr">Ins Türkische übersetzen</option>
-        </select>
-      </div>
+      <button id="btnSidebarOpen" class="icon-btn hidden" data-icon="sidebar" title="Seitenleiste einblenden"></button>
+      <div id="chatTitle" class="chat-title"></div>
       <div class="spacer"></div>
-      <label class="check"><input type="checkbox" id="ttsAuto"> Antworten vorlesen</label>
-      <button id="btnStopSpeak" class="ghost small hidden">⏹ Vorlesen stoppen</button>
-      <button id="btnExport" class="ghost small">Exportieren</button>
+      <button id="btnStopSpeak" class="pill hidden"><span data-icon="stop" data-size="14"></span>Vorlesen stoppen</button>
+      <button id="btnExport" class="icon-btn" data-icon="download" title="Chat exportieren"></button>
     </header>
 
     <div id="messages" class="messages">
       <div id="empty" class="empty">
         <div class="logo big">FA</div>
-        <h1>Deine private KI</h1>
+        <h1 id="greeting">Deine private KI</h1>
         <p>Alles läuft lokal auf diesem PC. Deine Chats und Dateien verlassen den Rechner nicht.</p>
       </div>
     </div>
 
     <div id="progressBar" class="progress hidden"><div class="progress-text" id="progressText"></div><div class="bar"><div id="progressFill"></div></div></div>
 
-    <footer id="composer">
-      <div id="attachments" class="attachments"></div>
-      <div class="row">
-        <button id="btnAttach" class="icon" title="PDF, Bild oder Textdatei anhängen">📎</button>
-        <button id="btnMic" class="icon" title="Diktieren (Klick zum Starten/Beenden)">🎤</button>
-        <button id="btnConv" class="icon" title="Gesprächsmodus: sprechen, Antwort wird vorgelesen, dann hört die KI wieder zu">🗣</button>
-        <textarea id="input" rows="1" placeholder="Nachricht schreiben … (Enter = senden, Umschalt+Enter = neue Zeile)"></textarea>
-        <button id="btnSend" class="primary">Senden</button>
-        <button id="btnStop" class="danger hidden">Stopp</button>
+    <div id="composerWrap">
+      <div id="composer" class="card">
+        <div id="attachments" class="attachments"></div>
+        <textarea id="input" rows="1" placeholder="Wie kann ich helfen?"></textarea>
+        <div class="toolbar">
+          <button id="btnAttach" class="icon-btn" data-icon="paperclip" title="PDF, Bild oder Textdatei anhängen"></button>
+          <div class="menu-wrap">
+            <button id="btnTpl" class="icon-btn" data-icon="mail" title="E-Mail-Hilfe"></button>
+            <div id="tplMenu" class="menu hidden"></div>
+          </div>
+          <select id="profileSel" class="mini" title="Profil (Absenderangaben für Briefe und E-Mails)"></select>
+          <div class="spacer"></div>
+          <select id="modelSel" class="mini" title="Modell"></select>
+          <div class="field-inline" id="thinkField"><select id="thinkSel" class="mini" title="Denktiefe"></select></div>
+          <button id="btnTts" class="icon-btn" data-icon="speaker" title="Antworten automatisch vorlesen"></button>
+          <button id="btnMic" class="icon-btn" data-icon="mic" title="Diktieren (Klick zum Starten/Beenden)"></button>
+          <button id="btnConv" class="icon-btn" data-icon="wave" title="Gesprächsmodus: sprechen, Antwort wird vorgelesen, dann hört die KI wieder zu"></button>
+          <button id="btnSend" class="send" data-icon="up" title="Senden"></button>
+          <button id="btnStop" class="send stop hidden" data-icon="stop" title="Antwort stoppen"></button>
+        </div>
       </div>
       <div id="hint" class="hint"></div>
-    </footer>
+    </div>
   </main>
 </div>
 

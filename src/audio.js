@@ -85,83 +85,111 @@ export async function startRecording({ vad = false, onLevel } = {}) {
 }
 
 // ---------- Vorlesen ----------
-let playing = null; // { aborted, audio }
-let session = 0;
+let playing = null; // { audio }
+let session = 0;    // wird bei jedem Stopp erhöht: alles Alte ist dann ungültig
+let stateCb = null;
+
+function hardCancelSynth() {
+  try {
+    const ss = window.speechSynthesis;
+    ss.cancel();
+    ss.resume();
+    ss.cancel();
+  } catch { /* egal */ }
+}
 
 export function stopSpeaking() {
   session++;
-  if (playing && playing.audio) { try { playing.audio.pause(); } catch { /* egal */ } }
+  if (playing && playing.audio) {
+    try { playing.audio.pause(); playing.audio.removeAttribute('src'); playing.audio.load(); } catch { /* egal */ }
+    if (playing.done) playing.done();
+  }
   playing = null;
-  try { window.speechSynthesis.cancel(); } catch { /* egal */ }
+  hardCancelSynth();
+  // Manche Windows-Stimmen reagieren erst verzögert auf cancel – daher mehrfach.
+  setTimeout(hardCancelSynth, 80);
+  setTimeout(hardCancelSynth, 400);
+  if (stateCb) { const cb = stateCb; stateCb = null; cb(false); }
 }
 
-export const isSpeaking = () => !!playing;
+export const isSpeaking = () => !!playing || window.speechSynthesis.speaking;
 
 function pickWindowsVoice(lang) {
   const voices = window.speechSynthesis.getVoices();
   const pref = lang === 'tr' ? /^tr/i : /^de/i;
   const list = voices.filter((v) => pref.test(v.lang));
-  // „Natural“/Online-Stimmen klingen am besten, wenn vorhanden
   return list.find((v) => /natural|online/i.test(v.name)) || list[0] || null;
 }
 
-function speakWindows(text, lang) {
+function speakWindows(text, lang, rate, token) {
   return new Promise((resolve) => {
+    if (token !== session) return resolve();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = lang === 'tr' ? 'tr-TR' : 'de-DE';
+    u.rate = Math.min(2, Math.max(0.5, rate || 1));
     const v = pickWindowsVoice(lang);
     if (v) u.voice = v;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+    let finished = false;
+    const end = () => { if (!finished) { finished = true; resolve(); } };
+    u.onend = end;
+    u.onerror = end;
+    // Wurde zwischenzeitlich gestoppt, sofort abbrechen
+    u.onboundary = () => { if (token !== session) { hardCancelSynth(); end(); } };
     window.speechSynthesis.speak(u);
   });
 }
 
 function playBytes(bytes, token) {
   return new Promise((resolve) => {
+    if (token !== session) return resolve();
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = new Audio(url);
-    playing = { audio: a };
-    const end = () => { URL.revokeObjectURL(url); resolve(); };
-    a.onended = end; a.onerror = end;
-    if (token !== session) return end();
-    a.play().catch(end);
+    let finished = false;
+    const done = () => { if (!finished) { finished = true; URL.revokeObjectURL(url); resolve(); } };
+    playing = { audio: a, done };
+    a.onended = done;
+    a.onerror = done;
+    a.play().catch(done);
   });
 }
 
 /**
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
- * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme.
+ * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
-export async function speak(markdown, { voicePref = 'auto', speechStatus, onState } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, onState } = {}) {
   stopSpeaking();
   const token = session;
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
   const piperOk = voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang];
-  const sentences = splitSentences(plain, piperOk ? 300 : 220);
+  const sentences = splitSentences(plain, piperOk ? 300 : 200);
+  stateCb = onState || null;
   onState && onState(true);
   try {
     if (piperOk) {
-      let next = window.api.speech.synthesize({ text: sentences[0], voice: lang }).catch(() => null);
+      let next = window.api.speech.synthesize({ text: sentences[0], voice: lang, speed }).catch(() => null);
       for (let i = 0; i < sentences.length; i++) {
         const cur = await next;
         if (token !== session) return;
         next = i + 1 < sentences.length
-          ? window.api.speech.synthesize({ text: sentences[i + 1], voice: lang }).catch(() => null)
+          ? window.api.speech.synthesize({ text: sentences[i + 1], voice: lang, speed }).catch(() => null)
           : null;
         if (cur) await playBytes(cur, token);
-        else await speakWindows(sentences[i], lang);
+        else await speakWindows(sentences[i], lang, speed, token);
         if (token !== session) return;
       }
     } else {
       for (const s of sentences) {
         if (token !== session) return;
-        await speakWindows(s, lang);
+        await speakWindows(s, lang, speed, token);
       }
     }
   } finally {
-    if (token === session) { playing = null; onState && onState(false); }
+    if (token === session) {
+      playing = null;
+      if (stateCb) { const cb = stateCb; stateCb = null; cb(false); }
+    }
   }
 }

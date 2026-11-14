@@ -4,19 +4,20 @@ import { readPdf, prepareImage, isPdf, isImage } from './docs.js';
 import { startRecording, speak, stopSpeaking } from './audio.js';
 import { fitText, formatBytes } from '../lib/util.js';
 import { buildThink } from '../lib/ollama.js';
+import { $, el, icon, iconButton, applyIcons, openModal, closeModal, newId } from './ui.js';
+import { openSettings, profilePrompt } from './settings.js';
 
 const api = window.api;
-const $ = (id) => document.getElementById(id);
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-const TEMPLATES = {
-  reply_de: 'Entwirf eine höfliche, klare Antwort auf Deutsch auf diese E-Mail. Gib nur den Entwurf aus (mit Betreff, falls sinnvoll).\n\nE-Mail:\n',
-  reply_tr: 'Bu e-postaya nazik ve net bir Türkçe cevap taslağı yaz. Sadece taslağı ver (gerekirse konu satırıyla).\n\nE-posta:\n',
-  summary: 'Fasse diese E-Mail kurz auf Deutsch zusammen: Worum geht es, was wird von mir erwartet, gibt es Fristen? \n\nE-Mail:\n',
-  formal: 'Schreibe den folgenden Text höflich und formell um, behalte die Sprache bei:\n\n',
-  translate_de: 'Übersetze den folgenden Text ins Deutsche:\n\n',
-  translate_tr: 'Aşağıdaki metni Türkçeye çevir:\n\n',
-};
+const TEMPLATES = [
+  ['reply_de', 'Antwort auf Deutsch entwerfen', 'Entwirf eine höfliche, klare Antwort auf Deutsch auf diese E-Mail. Gib nur den Entwurf aus (mit Betreff, falls sinnvoll).\n\nE-Mail:\n'],
+  ['reply_tr', 'Antwort auf Türkisch entwerfen', 'Bu e-postaya nazik ve net bir Türkçe cevap taslağı yaz. Sadece taslağı ver (gerekirse konu satırıyla).\n\nE-posta:\n'],
+  ['summary', 'E-Mail zusammenfassen', 'Fasse diese E-Mail kurz auf Deutsch zusammen: Worum geht es, was wird von mir erwartet, gibt es Fristen?\n\nE-Mail:\n'],
+  ['letter', 'Brief schreiben (mit meinem Profil)', 'Schreibe einen formellen Brief mit meinen Absenderangaben aus dem Profil. Thema und Empfänger:\n\n'],
+  ['formal', 'Höflich/formell umschreiben', 'Schreibe den folgenden Text höflich und formell um, behalte die Sprache bei:\n\n'],
+  ['translate_de', 'Ins Deutsche übersetzen', 'Übersetze den folgenden Text ins Deutsche:\n\n'],
+  ['translate_tr', 'Ins Türkische übersetzen', 'Aşağıdaki metni Türkçeye çevir:\n\n'],
+];
 
 const state = {
   settings: null,
@@ -24,25 +25,33 @@ const state = {
   caps: {},
   chat: null,
   chats: [],
-  pending: [],      // Anhänge der nächsten Nachricht
-  streaming: null,  // { id, msgEl, ... }
+  pending: [],
+  streaming: null,
   speechStatus: null,
   conv: false,
   rec: null,
   speaking: false,
+  search: '',
 };
 
 marked.setOptions({ gfm: true, breaks: true });
-
 function renderMd(text) {
-  const html = marked.parse(text || '', { async: false });
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+  return DOMPurify.sanitize(marked.parse(text || '', { async: false }), { USE_PROFILES: { html: true } });
 }
 
-const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 function newChat() {
   return { id: newId(), title: 'Neuer Chat', model: state.settings.model || '', updated: Date.now(), messages: [] };
 }
+
+// ---------- Aussehen ----------
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+function applyAppearance(s) {
+  const theme = s.theme === 'system' ? (darkQuery.matches ? 'dark' : 'light') : s.theme;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.setProperty('--fs', (s.fontSize || 16) + 'px');
+  document.body.classList.toggle('serif', !!s.serif);
+}
+darkQuery.addEventListener('change', () => applyAppearance(state.settings));
 
 // ---------- Hinweise / Fortschritt ----------
 let hintTimer = null;
@@ -58,12 +67,11 @@ function showProgress(label, pct) {
   f.classList.toggle('indet', pct == null);
   f.style.width = pct != null ? pct + '%' : '';
 }
-function hideProgress() { $('progressBar').classList.add('hidden'); }
+const hideProgress = () => $('progressBar').classList.add('hidden');
 
 api.speech.onProgress((p) => {
-  const label = p.label || 'Download';
   const extra = p.total ? ` (${formatBytes(p.received)} / ${formatBytes(p.total)})` : '';
-  showProgress(label + extra, p.pct);
+  showProgress((p.label || 'Download') + extra, p.pct);
 });
 
 // ---------- Status & Modelle ----------
@@ -78,20 +86,15 @@ async function refreshStatus() {
 }
 
 async function loadModels() {
-  try {
-    state.models = await api.ollama.models();
-  } catch (e) {
-    state.models = [];
-  }
+  try { state.models = await api.ollama.models(); } catch { state.models = []; }
   const sel = $('modelSel');
   sel.innerHTML = '';
   const visible = state.models.filter((m) => state.settings.showCloud || !m.remote);
-  if (!visible.length) {
-    const o = el('option', null, 'Kein Modell installiert'); o.value = ''; sel.appendChild(o);
-  }
+  if (!visible.length) { const o = el('option', null, 'Kein Modell'); o.value = ''; sel.appendChild(o); }
   for (const m of visible) {
-    const o = el('option', null, m.name + (m.remote ? ' (Cloud!)' : '') + (m.size ? ` · ${formatBytes(m.size)}` : ''));
+    const o = el('option', null, m.name + (m.remote ? ' (Cloud!)' : ''));
     o.value = m.name;
+    o.title = m.size ? formatBytes(m.size) : '';
     sel.appendChild(o);
   }
   const want = (state.chat && state.chat.model) || state.settings.model;
@@ -111,45 +114,107 @@ async function getCaps(name) {
 async function onModelChanged(save = true) {
   const name = $('modelSel').value;
   const caps = await getCaps(name);
+  $('thinkField').style.display = caps.includes('thinking') ? '' : 'none';
   const thinkSel = $('thinkSel');
-  const canThink = caps.includes('thinking');
-  $('thinkField').style.display = canThink ? '' : 'none';
-  const keep = state.settings.think;
+  const prev = thinkSel.value;
   thinkSel.innerHTML = '';
-  const opts = /gpt-oss/i.test(name)
-    ? [['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']]
-    : [['off', 'Aus'], ['on', 'An']];
+  const three = /gpt-oss/i.test(name);
+  const opts = three ? [['low', 'Denken: niedrig'], ['medium', 'Denken: mittel'], ['high', 'Denken: hoch']] : [['off', 'Denken: aus'], ['on', 'Denken: an']];
   for (const [v, t] of opts) { const o = el('option', null, t); o.value = v; thinkSel.appendChild(o); }
-  thinkSel.value = opts.some(([v]) => v === keep) ? keep : (opts.length === 3 ? 'medium' : 'on');
+  const keep = prev && opts.some(([v]) => v === prev) ? prev : state.settings.think;
+  thinkSel.value = opts.some(([v]) => v === keep) ? keep : (three ? 'medium' : 'on');
   if (state.chat) state.chat.model = name;
-  if (save && name) { state.settings = await api.settings.set({ model: name }); }
+  if (save && name) state.settings = await api.settings.set({ model: name });
+}
+
+// ---------- Profile ----------
+const activeProfile = () => (state.settings.profiles || []).find((p) => p.id === state.settings.activeProfile) || null;
+
+function renderProfileSelect() {
+  const sel = $('profileSel');
+  sel.innerHTML = '';
+  const none = el('option', null, 'Profil: keins'); none.value = ''; sel.appendChild(none);
+  for (const p of state.settings.profiles || []) {
+    const o = el('option', null, 'Profil: ' + (p.label || p.fullName || 'Ohne Namen')); o.value = p.id; sel.appendChild(o);
+  }
+  sel.value = (state.settings.profiles || []).some((p) => p.id === state.settings.activeProfile) ? state.settings.activeProfile : '';
+}
+
+function renderGreeting() {
+  const g = $('greeting');
+  if (!g) return;
+  const h = new Date().getHours();
+  const hello = h < 5 ? 'Gute Nacht' : h < 11 ? 'Guten Morgen' : h < 18 ? 'Guten Tag' : 'Guten Abend';
+  const p = activeProfile();
+  const first = p && p.fullName ? p.fullName.trim().split(/\s+/)[0] : '';
+  g.textContent = first ? `${hello}, ${first}` : hello;
 }
 
 // ---------- Chatliste ----------
+function groupOf(ts) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const day = 86400000;
+  if (ts >= d.getTime()) return 'Heute';
+  if (ts >= d.getTime() - day) return 'Gestern';
+  if (ts >= d.getTime() - 7 * day) return 'Letzte 7 Tage';
+  return 'Älter';
+}
+
 async function refreshChats() {
   state.chats = await api.chats.list();
   const box = $('chatList');
   box.innerHTML = '';
+  const q = state.search.trim().toLowerCase();
+  let last = '';
   for (const c of state.chats) {
+    if (q && !c.title.toLowerCase().includes(q)) continue;
+    const g = groupOf(c.updated);
+    if (g !== last) { box.appendChild(el('div', 'group-label', g)); last = g; }
     const row = el('div', 'chat-item' + (state.chat && state.chat.id === c.id ? ' active' : ''));
-    row.appendChild(el('span', 't', c.title));
-    const x = el('button', 'x', '✕'); x.title = 'Chat löschen';
-    x.onclick = async (ev) => {
+    const t = el('span', 't', c.title);
+    row.appendChild(t);
+    const ren = iconButton('edit', 'Umbenennen', 'row-btn', 14);
+    ren.onclick = (ev) => {
+      ev.stopPropagation();
+      const inp = el('input', 't-edit'); inp.type = 'text'; inp.value = c.title;
+      row.replaceChild(inp, t);
+      inp.focus(); inp.select();
+      let done = false;
+      const commit = async (ok) => {
+        if (done) return; done = true;
+        const title = inp.value.trim();
+        if (ok && title && title !== c.title) {
+          const full = await api.chats.load(c.id);
+          if (full) { full.title = title; await api.chats.save(full); }
+          if (state.chat && state.chat.id === c.id) state.chat.title = title;
+        }
+        refreshChats(); updateTitle();
+      };
+      inp.onkeydown = (e) => { if (e.key === 'Enter') commit(true); if (e.key === 'Escape') commit(false); };
+      inp.onblur = () => commit(true);
+      inp.onclick = (e) => e.stopPropagation();
+    };
+    const del = iconButton('trash', 'Chat löschen', 'row-btn del', 14);
+    del.onclick = async (ev) => {
       ev.stopPropagation();
       if (!confirm(`Chat „${c.title}“ endgültig löschen?`)) return;
       await api.chats.remove(c.id);
       if (state.chat && state.chat.id === c.id) await openChat(null);
       else await refreshChats();
     };
-    row.appendChild(x);
+    row.append(ren, del);
     row.onclick = () => openChat(c.id);
     box.appendChild(row);
   }
 }
 
+function updateTitle() {
+  $('chatTitle').textContent = state.chat && state.chat.messages.length ? state.chat.title : '';
+}
+
 async function openChat(id) {
   if (state.streaming) return hint('Bitte warte, bis die Antwort fertig ist (oder klicke auf Stopp).');
-  stopSpeaking();
+  stopAllSpeech();
   state.chat = id ? await api.chats.load(id) : newChat();
   if (!state.chat) state.chat = newChat();
   if (state.chat.model && state.models.some((m) => m.name === state.chat.model)) $('modelSel').value = state.chat.model;
@@ -162,38 +227,44 @@ async function openChat(id) {
 function renderAll() {
   const box = $('messages');
   box.innerHTML = '';
+  updateTitle();
   if (!state.chat.messages.length) {
     box.appendChild($('empty') || makeEmpty());
-    $('empty').classList.remove('hidden');
-  } else {
-    for (const m of state.chat.messages) box.appendChild(buildMsg(m));
-    box.scrollTop = box.scrollHeight;
+    renderGreeting();
+    return;
   }
+  const last = state.chat.messages.length - 1;
+  state.chat.messages.forEach((m, i) => box.appendChild(buildMsg(m, i === last)));
+  box.scrollTop = box.scrollHeight;
 }
 function makeEmpty() {
   const d = el('div', 'empty'); d.id = 'empty';
-  d.innerHTML = '<div class="logo big">FA</div><h1>Deine private KI</h1><p>Alles läuft lokal auf diesem PC.</p>';
+  d.innerHTML = '<div class="logo big">FA</div><h1 id="greeting"></h1><p>Alles läuft lokal auf diesem PC.</p>';
   return d;
 }
 
-function buildMsg(m) {
+function buildMsg(m, isLast = false) {
   const wrap = el('div', 'msg ' + m.role);
-  wrap.appendChild(el('div', 'who', m.role === 'user' ? 'Du' : 'KI'));
-  const body = el('div', 'bubble');
-  wrap.appendChild(body);
-  fillMsg(wrap, m);
+  wrap.appendChild(el('div', 'bubble'));
+  fillMsg(wrap, m, false, isLast);
   return wrap;
 }
 
-function fillMsg(wrap, m, live = false) {
+function fillMsg(wrap, m, live = false, isLast = false) {
   const body = wrap.querySelector('.bubble');
   body.innerHTML = '';
+  wrap.querySelectorAll('.chips,.msg-actions').forEach((n) => n.remove());
   if (m.role === 'user') {
     body.textContent = m.content;
     if (m.attachments && m.attachments.length) {
       const chips = el('div', 'chips');
-      for (const a of m.attachments) chips.appendChild(el('span', 'chip', '📎 ' + a.name + (a.note ? ' · ' + a.note : '')));
-      wrap.querySelector('.bubble').after(chips);
+      for (const a of m.attachments) {
+        const c = el('span', 'chip');
+        c.innerHTML = icon(a.note && /Bild/.test(a.note) ? 'image' : 'file', 14);
+        c.appendChild(document.createTextNode(a.name + (a.note ? ' · ' + a.note : '')));
+        chips.appendChild(c);
+      }
+      wrap.appendChild(chips);
     }
     return;
   }
@@ -208,7 +279,10 @@ function fillMsg(wrap, m, live = false) {
   md.innerHTML = renderMd(m.content);
   md.querySelectorAll('pre').forEach((pre) => {
     const b = el('button', 'copybtn', 'Kopieren');
-    b.onclick = () => { navigator.clipboard.writeText(pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText); b.textContent = 'Kopiert ✓'; setTimeout(() => { b.textContent = 'Kopieren'; }, 1500); };
+    b.onclick = () => {
+      navigator.clipboard.writeText(pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText);
+      b.textContent = 'Kopiert ✓'; setTimeout(() => { b.textContent = 'Kopieren'; }, 1500);
+    };
     pre.appendChild(b);
   });
   md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
@@ -218,12 +292,17 @@ function fillMsg(wrap, m, live = false) {
     body.appendChild(el('div', 'stats', `${(m.stats.evalCount / (m.stats.evalDuration / 1e9)).toFixed(1).replace('.', ',')} Token/s`));
   }
   if (!live) {
-    let ac = wrap.querySelector('.msg-actions');
-    if (ac) ac.remove();
-    ac = el('div', 'msg-actions');
-    const cp = el('button', null, 'Kopieren'); cp.onclick = () => { navigator.clipboard.writeText(m.content); cp.textContent = 'Kopiert ✓'; };
-    const sp = el('button', null, '🔊 Vorlesen'); sp.onclick = () => speakNow(m.content);
-    ac.appendChild(cp); ac.appendChild(sp);
+    const ac = el('div', 'msg-actions');
+    const cp = iconButton('copy', 'Kopieren');
+    cp.onclick = () => { navigator.clipboard.writeText(m.content); cp.innerHTML = icon('check'); setTimeout(() => { cp.innerHTML = icon('copy'); }, 1500); };
+    const sp = iconButton('speaker', 'Vorlesen');
+    sp.onclick = () => speakNow(m.content);
+    ac.append(cp, sp);
+    if (isLast) {
+      const rg = iconButton('refresh', 'Antwort neu erzeugen');
+      rg.onclick = regenerate;
+      ac.appendChild(rg);
+    }
     wrap.appendChild(ac);
   }
 }
@@ -232,17 +311,24 @@ function fillMsg(wrap, m, live = false) {
 function setBusy(on) {
   $('btnSend').classList.toggle('hidden', on);
   $('btnStop').classList.toggle('hidden', !on);
-  $('input').disabled = false;
 }
 
-async function buildOllamaMessages() {
+function systemText() {
   const s = state.settings;
+  const parts = [];
+  if (s.systemPrompt && s.systemPrompt.trim()) parts.push(s.systemPrompt.trim());
+  const pp = profilePrompt(activeProfile());
+  if (pp) parts.push(pp);
+  return parts.join('\n\n');
+}
+
+function buildOllamaMessages() {
   const msgs = [];
-  if (s.systemPrompt && s.systemPrompt.trim()) msgs.push({ role: 'system', content: s.systemPrompt.trim() });
+  const sys = systemText();
+  if (sys) msgs.push({ role: 'system', content: sys });
   for (const m of state.chat.messages) {
     if (m.role === 'assistant') { if (m.content) msgs.push({ role: 'assistant', content: m.content }); continue; }
-    const ctx = m.ctx ? m.ctx + '\n\n' : '';
-    const o = { role: 'user', content: ctx + m.content };
+    const o = { role: 'user', content: (m.ctx ? m.ctx + '\n\n' : '') + m.content };
     if (m.images && m.images.length) o.images = m.images;
     msgs.push(o);
   }
@@ -256,11 +342,10 @@ async function send() {
   const model = $('modelSel').value;
   if (!model) return hint('Bitte zuerst ein Modell installieren (links unten „Modelle verwalten“).');
   if (!(await refreshStatus())) return;
-  stopSpeaking();
+  stopAllSpeech();
   if (!state.chat) state.chat = newChat();
   const caps = await getCaps(model);
 
-  // Anhänge verarbeiten
   const attachments = [];
   const images = [];
   const ctxParts = [];
@@ -277,15 +362,13 @@ async function send() {
       else if (p.ocrText) {
         ctxParts.push(`[Text aus Bild: ${p.name}]\n${fitText(p.ocrText, perDoc).text}\n[Ende]`);
         attachments.push({ name: p.name, note: 'Bild (Text per OCR gelesen)' });
-      } else { hint('Dieses Modell kann keine Bilder sehen – nutze ein Modell mit Bild-Fähigkeit.'); }
+      } else hint('Dieses Modell kann keine Bilder sehen – nutze ein Modell mit Bild-Fähigkeit.');
     }
   }
   const userMsg = {
     role: 'user',
     content: text || 'Bitte lies die angehängte Datei und fasse sie zusammen.',
-    attachments,
-    ctx: ctxParts.join('\n\n'),
-    images,
+    attachments, ctx: ctxParts.join('\n\n'), images,
   };
   state.chat.messages.push(userMsg);
   if (state.chat.title === 'Neuer Chat') state.chat.title = (text || attachments[0]?.name || 'Chat').slice(0, 42);
@@ -294,28 +377,46 @@ async function send() {
   renderPending();
   $('input').value = '';
   autosize();
+  $('empty')?.remove();
+  $('messages').querySelectorAll('.msg-actions').forEach((n) => n.remove());
+  $('messages').appendChild(buildMsg(userMsg));
+  await runAssistant();
+}
 
+async function runAssistant() {
+  const model = $('modelSel').value;
+  const caps = await getCaps(model);
+  const history = buildOllamaMessages();
   const asst = { role: 'assistant', content: '', thinking: '' };
   state.chat.messages.push(asst);
-  $('messages').querySelector('#empty')?.remove();
-  $('messages').appendChild(buildMsg(userMsg));
-  const wrap = buildMsg(asst);
+  const wrap = buildMsg(asst, false);
   $('messages').appendChild(wrap);
   $('messages').scrollTop = $('messages').scrollHeight;
+  updateTitle();
 
   const id = newId();
   state.streaming = { id, asst, wrap };
   setBusy(true);
-  const think = buildThink(model, caps, $('thinkSel').value === 'on' ? 'on' : $('thinkSel').value);
+  const think = buildThink(model, caps, $('thinkSel').value);
+  const ka = state.settings.keepAlive;
   const body = {
     model,
-    messages: await buildOllamaMessages(),
+    messages: history,
     options: { num_ctx: state.settings.numCtx, temperature: state.settings.temperature },
-    keep_alive: '30m',
+    keep_alive: ka === '-1' ? -1 : ka,
   };
   if (think !== undefined) body.think = think;
   api.chat.start({ id, body });
   api.chats.save(state.chat);
+}
+
+async function regenerate() {
+  if (state.streaming) return;
+  const msgs = state.chat.messages;
+  if (!msgs.length || msgs[msgs.length - 1].role !== 'assistant') return;
+  msgs.pop();
+  renderAll();
+  await runAssistant();
 }
 
 let raf = 0;
@@ -326,7 +427,7 @@ function scheduleRender() {
     const s = state.streaming;
     if (!s) return;
     const box = $('messages');
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
     fillMsg(s.wrap, s.asst, true);
     if (nearBottom) box.scrollTop = box.scrollHeight;
   });
@@ -348,28 +449,39 @@ async function finishStream(id, extra) {
   setBusy(false);
   if (!s.asst.content && !s.asst.thinking && !s.asst.error) s.asst.content = '_(keine Antwort erhalten)_';
   state.chat.updated = Date.now();
-  fillMsg(s.wrap, s.asst, false);
+  fillMsg(s.wrap, s.asst, false, true);
   await api.chats.save(state.chat);
   await refreshChats();
-  if ((state.settings.ttsAuto || state.conv) && s.asst.content && !s.asst.error) {
-    await speakNow(s.asst.content);
-  }
+  if ((state.settings.ttsAuto || state.conv) && s.asst.content && !s.asst.error && !(extra && extra.aborted)) await speakNow(s.asst.content);
   if (state.conv) convListen();
 }
-
 api.chat.onDone(({ id, stats, aborted }) => finishStream(id, { stats, aborted }));
 api.chat.onError(({ id, error }) => finishStream(id, { error }));
 
 // ---------- Vorlesen ----------
-async function speakNow(text) {
+async function speakNow(text, settingsOverride) {
+  const s = settingsOverride || state.settings;
   try {
     state.speechStatus = await api.speech.status();
     await speak(text, {
-      voicePref: state.settings.ttsVoice,
+      voicePref: s.ttsVoice,
       speechStatus: state.speechStatus,
+      speed: s.ttsSpeed || 1,
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
+}
+function stopAllSpeech() {
+  stopSpeaking();
+  state.speaking = false;
+  $('btnStopSpeak').classList.add('hidden');
+}
+
+function renderTtsButton() {
+  const b = $('btnTts');
+  b.classList.toggle('on', !!state.settings.ttsAuto);
+  b.innerHTML = icon(state.settings.ttsAuto ? 'speaker' : 'speakerOff');
+  b.title = state.settings.ttsAuto ? 'Antworten werden automatisch vorgelesen (Klick zum Ausschalten)' : 'Antworten automatisch vorlesen';
 }
 
 // ---------- Mikrofon ----------
@@ -390,32 +502,26 @@ async function ensureStt() {
   }
 }
 
-async function transcribeAndFill(wav) {
+async function transcribeWav(wav) {
   if (!wav) { hint('Es wurde nichts gesprochen.'); return ''; }
   showProgress('Sprache wird erkannt', null);
-  try {
-    const t = await api.speech.transcribe({ wav, lang: state.settings.sttLang, model: state.settings.sttModel });
-    return t;
-  } catch (e) {
-    hint('Erkennung fehlgeschlagen: ' + (e.message || e), 0);
-    return '';
-  } finally { hideProgress(); }
+  try { return await api.speech.transcribe({ wav, lang: state.settings.sttLang, model: state.settings.sttModel }); }
+  catch (e) { hint('Erkennung fehlgeschlagen: ' + (e.message || e), 0); return ''; }
+  finally { hideProgress(); }
 }
 
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
   if (!(await ensureStt())) return;
-  try {
-    stopSpeaking();
-    state.rec = await startRecording({ vad: false });
-  } catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  try { stopAllSpeech(); state.rec = await startRecording({ vad: false }); }
+  catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   $('btnMic').classList.add('rec');
-  hint('Aufnahme läuft … nochmal auf 🎤 klicken zum Beenden.', 0);
+  hint('Aufnahme läuft … nochmal auf das Mikrofon klicken zum Beenden.', 0);
   const wav = await state.rec.done;
   state.rec = null;
   $('btnMic').classList.remove('rec');
   hint('');
-  const t = await transcribeAndFill(wav);
+  const t = await transcribeWav(wav);
   if (t) {
     const cur = $('input').value;
     $('input').value = (cur ? cur + ' ' : '') + t;
@@ -426,16 +532,15 @@ async function toggleMic() {
 
 async function convListen() {
   if (!state.conv || state.rec || state.streaming) return;
-  try {
-    state.rec = await startRecording({ vad: true });
-  } catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  try { state.rec = await startRecording({ vad: true }); }
+  catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   hint('Ich höre zu … sprich einfach.', 0);
   const wav = await state.rec.done;
   state.rec = null;
   if (!state.conv) return;
   if (!wav) return convListen();
   hint('');
-  const t = await transcribeAndFill(wav);
+  const t = await transcribeWav(wav);
   if (!state.conv) return;
   if (t && t.length > 1) { $('input').value = t; await send(); } else convListen();
 }
@@ -445,7 +550,7 @@ async function toggleConv() {
     state.conv = false;
     $('btnConv').classList.remove('rec');
     if (state.rec) state.rec.cancel();
-    stopSpeaking(); hint('Gesprächsmodus beendet.');
+    stopAllSpeech(); hint('Gesprächsmodus beendet.');
     return;
   }
   if (!(await ensureStt())) return;
@@ -460,8 +565,10 @@ function renderPending() {
   box.innerHTML = '';
   state.pending.forEach((p, i) => {
     const a = el('div', 'att');
-    a.appendChild(el('span', null, (p.kind === 'image' ? '🖼 ' : '📄 ') + p.name + (p.note ? ' · ' + p.note : '')));
-    const x = el('button', null, '✕'); x.onclick = () => { state.pending.splice(i, 1); renderPending(); };
+    a.innerHTML = icon(p.kind === 'image' ? 'image' : 'file', 14);
+    a.appendChild(document.createTextNode(p.name + (p.note ? ' · ' + p.note : '')));
+    const x = iconButton('x', 'Entfernen', '', 14);
+    x.onclick = () => { state.pending.splice(i, 1); renderPending(); };
     a.appendChild(x);
     box.appendChild(a);
   });
@@ -489,130 +596,30 @@ async function addFile(name, data) {
       const text = new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data));
       state.pending.push({ kind: 'doc', name, text, note: `${text.length} Zeichen` });
     }
-  } catch (e) {
-    hint(`„${name}“ konnte nicht gelesen werden: ${e.message || e}`, 0);
-  } finally { hideProgress(); }
+  } catch (e) { hint(`„${name}“ konnte nicht gelesen werden: ${e.message || e}`, 0); }
+  finally { hideProgress(); }
   renderPending();
 }
-
 async function pickFiles() {
-  const files = await api.files.pick();
-  for (const f of files) await addFile(f.name, f.data);
+  for (const f of await api.files.pick()) await addFile(f.name, f.data);
 }
 
-// ---------- Dialoge ----------
-function openModal(build) {
-  const m = $('modal');
-  m.innerHTML = '';
-  build(m);
-  $('overlay').classList.remove('hidden');
-}
-function closeModal() { $('overlay').classList.add('hidden'); $('modal').innerHTML = ''; }
-$('overlay').addEventListener('mousedown', (e) => { if (e.target === $('overlay')) closeModal(); });
-
-function formRow(label, control, note) {
-  const r = el('div', 'form-row');
-  r.appendChild(el('label', null, label));
-  r.appendChild(control);
-  if (note) r.appendChild(el('div', 'note', note));
-  return r;
-}
-function selectOf(options, value) {
-  const s = document.createElement('select');
-  for (const [v, t] of options) { const o = el('option', null, t); o.value = v; s.appendChild(o); }
-  s.value = value;
-  return s;
-}
-
-async function openSettings() {
-  const st = await api.speech.status();
-  const info = await api.app.info();
-  openModal((m) => {
-    const S = state.settings;
-    m.appendChild(el('h2', null, 'Einstellungen'));
-    const url = el('input'); url.type = 'text'; url.value = S.ollamaUrl;
-    const sys = el('textarea'); sys.rows = 4; sys.value = S.systemPrompt;
-    const ctx = el('input'); ctx.type = 'number'; ctx.min = 2048; ctx.step = 1024; ctx.value = S.numCtx;
-    const temp = el('input'); temp.type = 'number'; temp.min = 0; temp.max = 2; temp.step = 0.1; temp.value = S.temperature;
-    const cloud = el('input'); cloud.type = 'checkbox'; cloud.checked = S.showCloud;
-    const tts = selectOf([['auto', 'Automatisch (Deutsch/Türkisch)'], ['de', 'Immer Deutsch'], ['tr', 'Immer Türkisch'], ['windows', 'Nur Windows-Stimme']], S.ttsVoice);
-    const stt = selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], S.sttLang);
-    const sttm = selectOf([['base', 'Schnell (base)'], ['small', 'Ausgewogen (small)'], ['medium', 'Genau (medium)']], S.sttModel);
-    const auto = el('input'); auto.type = 'checkbox'; auto.checked = S.autoSend;
-
-    m.appendChild(formRow('Adresse von Ollama', url, 'Standard: http://127.0.0.1:11434 – bleibt auf diesem PC.'));
-    m.appendChild(formRow('Anweisung an die KI (System-Prompt)', sys));
-    m.appendChild(formRow('Kontextlänge (Tokens)', ctx, 'Mehr = längere PDFs, aber mehr Speicher/langsamer. 16384 ist ein guter Start.'));
-    m.appendChild(formRow('Kreativität (Temperatur)', temp));
-    const c1 = el('label', 'check'); c1.append(cloud, ' Cloud-Modelle in der Liste anzeigen (senden Daten an fremde Server!)');
-    m.appendChild(c1);
-    m.appendChild(el('h3', null, 'Sprache'));
-    m.appendChild(formRow('Stimme beim Vorlesen', tts));
-    m.appendChild(formRow('Sprache beim Diktieren', stt));
-    m.appendChild(formRow('Genauigkeit der Spracherkennung', sttm));
-    const c2 = el('label', 'check'); c2.append(auto, ' Diktierten Text sofort senden');
-    m.appendChild(c2);
-
-    m.appendChild(el('h3', null, 'Lokale Sprach-Bausteine'));
-    const mkRow = (title, ok, sub, btnText, fn) => {
-      const r = el('div', 'list-row');
-      const g = el('div', 'grow'); g.appendChild(el('div', null, title)); g.appendChild(el('div', 'sub', sub));
-      r.appendChild(g);
-      r.appendChild(el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? 'bereit' : 'fehlt'));
-      if (!ok || btnText) {
-        const b = el('button', 'small', ok ? 'Neu laden' : btnText); b.onclick = async () => {
-          b.disabled = true;
-          try { await fn(); hideProgress(); hint('Fertig: ' + title, 5000); } catch (e) { hideProgress(); hint(title + ': ' + (e.message || e), 0); }
-          closeModal(); openSettings();
-        }; r.appendChild(b);
-      }
-      return r;
-    };
-    const sttOk = st.whisperBinary && st.whisperModels[sttm.value];
-    m.appendChild(mkRow('Spracherkennung (Whisper)', sttOk, 'Für 🎤 und Gesprächsmodus', 'Einrichten', () => api.speech.prepareStt(sttm.value)));
-    for (const k of ['de', 'tr']) {
-      m.appendChild(mkRow('Natürliche Stimme: ' + st.info.voices[k].label, st.piperBinary && st.voices[k], 'ca. ' + st.info.voices[k].approx + ' – klingt deutlich natürlicher als die Windows-Stimme', 'Laden', () => api.speech.prepareTts(k)));
-    }
-
-    m.appendChild(el('h3', null, 'Info'));
-    m.appendChild(el('div', 'sub', `FA KI Desktop Version ${info.version}`));
-    const open = el('button', 'small', 'Datenordner öffnen'); open.onclick = () => api.app.openDataDir();
-    m.appendChild(open);
-
-    const act = el('div', 'actions');
-    const cancel = el('button', null, 'Abbrechen'); cancel.onclick = closeModal;
-    const save = el('button', 'primary', 'Speichern');
-    save.onclick = async () => {
-      state.settings = await api.settings.set({
-        ollamaUrl: url.value.trim() || 'http://127.0.0.1:11434',
-        systemPrompt: sys.value,
-        numCtx: Math.max(2048, parseInt(ctx.value, 10) || 16384),
-        temperature: Math.min(2, Math.max(0, parseFloat(temp.value) || 0.7)),
-        showCloud: cloud.checked, ttsVoice: tts.value, sttLang: stt.value, sttModel: sttm.value, autoSend: auto.checked,
-      });
-      closeModal();
-      await refreshStatus(); await loadModels();
-    };
-    act.append(cancel, save);
-    m.appendChild(act);
-  });
-}
-
+// ---------- Modelle-Dialog ----------
 async function openModels() {
   const render = async (m) => {
     m.innerHTML = '';
     m.appendChild(el('h2', null, 'Modelle verwalten'));
     let list = [];
-    try { list = await api.ollama.models(); } catch (e) { m.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); }
+    try { list = await api.ollama.models(); } catch { m.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); }
     m.appendChild(el('h3', null, 'Installiert'));
-    if (!list.length) m.appendChild(el('div', 'sub', 'Noch keine Modelle installiert.'));
+    if (!list.length) m.appendChild(el('div', 'note', 'Noch keine Modelle installiert.'));
     for (const x of list) {
       const r = el('div', 'list-row');
       const g = el('div', 'grow'); g.appendChild(el('div', null, x.name));
       g.appendChild(el('div', 'sub', (x.size ? formatBytes(x.size) : 'Cloud') + (x.details.parameter_size ? ' · ' + x.details.parameter_size : '')));
       r.appendChild(g);
       if (x.remote) r.appendChild(el('span', 'badge warn', 'Cloud – nicht lokal'));
-      const d = el('button', 'small', 'Löschen');
+      const d = el('button', 'btn small danger', 'Löschen');
       d.onclick = async () => {
         if (!confirm(`Modell „${x.name}“ löschen?`)) return;
         await api.ollama.remove(x.name); await loadModels(); render(m);
@@ -623,15 +630,15 @@ async function openModels() {
     m.appendChild(el('h3', null, 'Neues Modell laden'));
     const inl = el('div', 'inline');
     const inp = el('input'); inp.type = 'text'; inp.placeholder = 'z. B. gpt-oss:20b';
-    const go = el('button', 'primary', 'Laden');
+    const go = el('button', 'btn primary', 'Laden');
     inl.append(inp, go);
     m.appendChild(inl);
-    const sugg = el('div', 'chips');
+    const sugg = el('div', 'chips-row');
     for (const s of ['gpt-oss:20b', 'gemma4:12b']) {
-      const c = el('button', 'small', s); c.onclick = () => { inp.value = s; }; sugg.appendChild(c);
+      const c = el('button', 'btn small', s); c.onclick = () => { inp.value = s; }; sugg.appendChild(c);
     }
     m.appendChild(sugg);
-    const prog = el('div', 'sub', ''); prog.style.marginTop = '10px';
+    const prog = el('div', 'note', ''); prog.style.marginTop = '10px';
     m.appendChild(prog);
     const off = api.ollama.onPull((p) => {
       prog.textContent = p.total ? `${p.name}: ${p.status} – ${Math.round((p.completed / p.total) * 100)} % (${formatBytes(p.completed)} / ${formatBytes(p.total)})` : `${p.name}: ${p.status}`;
@@ -645,19 +652,37 @@ async function openModels() {
       catch (e) { prog.textContent = 'Fehler: ' + (e.message || e); go.disabled = false; go.textContent = 'Laden'; }
     };
     const act = el('div', 'actions');
-    const stop = el('button', null, 'Download abbrechen'); stop.onclick = () => api.ollama.pullCancel();
-    const close = el('button', 'primary', 'Schließen'); close.onclick = () => { off(); closeModal(); };
+    const stop = el('button', 'btn', 'Download abbrechen'); stop.onclick = () => api.ollama.pullCancel();
+    const close = el('button', 'btn primary', 'Schließen'); close.onclick = () => { off(); closeModal(); };
     act.append(stop, close);
     m.appendChild(act);
   };
   openModal(render);
 }
 
+// ---------- Einstellungen ----------
+function showSettings(tab) {
+  openSettings({
+    get settings() { return state.settings; },
+    api,
+    apply: applyAppearance,
+    hint, showProgress, hideProgress,
+    onSaved: async (next) => {
+      state.settings = next;
+      applyAppearance(next);
+      renderProfileSelect(); renderGreeting(); renderTtsButton();
+      await refreshStatus(); await loadModels();
+    },
+    speakSample: (text, draft) => speakNow(text, draft),
+    stopSpeaking: stopAllSpeech,
+    onChatsCleared: async () => { state.chat = newChat(); renderAll(); await refreshChats(); },
+  }, tab);
+}
+
 // ---------- Export ----------
 async function exportChat() {
   if (!state.chat || !state.chat.messages.length) return hint('Dieser Chat ist noch leer.');
-  const md = `# ${state.chat.title}\n\n` + state.chat.messages
-    .map((m) => `**${m.role === 'user' ? 'Du' : 'KI'}:**\n\n${m.content}`).join('\n\n---\n\n');
+  const md = `# ${state.chat.title}\n\n` + state.chat.messages.map((m) => `**${m.role === 'user' ? 'Du' : 'KI'}:**\n\n${m.content}`).join('\n\n---\n\n');
   if (await api.chats.export({ title: state.chat.title, markdown: md })) hint('Chat gespeichert.');
 }
 
@@ -665,39 +690,68 @@ async function exportChat() {
 function autosize() {
   const t = $('input');
   t.style.height = 'auto';
-  t.style.height = Math.min(220, t.scrollHeight) + 'px';
+  t.style.height = Math.min(240, t.scrollHeight) + 'px';
+}
+
+function toggleSidebar(open) {
+  $('sidebar').classList.toggle('closed', !open);
+  $('btnSidebarOpen').classList.toggle('hidden', open);
+  api.settings.set({ sidebarOpen: open });
+}
+
+function buildTemplateMenu() {
+  const menu = $('tplMenu');
+  menu.innerHTML = '';
+  menu.appendChild(el('div', 'menu-h', 'E-Mail- und Schreibhilfe'));
+  for (const [, label, prompt] of TEMPLATES) {
+    const b = el('button', null, label);
+    b.onclick = () => {
+      $('input').value = prompt + $('input').value;
+      autosize(); $('input').focus(); menu.classList.add('hidden');
+    };
+    menu.appendChild(b);
+  }
 }
 
 function wire() {
   $('btnSend').onclick = send;
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);
-  $('btnSettings').onclick = openSettings;
+  $('btnSettings').onclick = () => showSettings('general');
   $('btnModels').onclick = openModels;
   $('btnAttach').onclick = pickFiles;
   $('btnMic').onclick = toggleMic;
   $('btnConv').onclick = toggleConv;
   $('btnExport').onclick = exportChat;
-  $('btnStopSpeak').onclick = () => { stopSpeaking(); $('btnStopSpeak').classList.add('hidden'); };
+  $('btnStopSpeak').onclick = stopAllSpeech;
+  $('btnSidebar').onclick = () => toggleSidebar(false);
+  $('btnSidebarOpen').onclick = () => toggleSidebar(true);
+  $('chatSearch').oninput = (e) => { state.search = e.target.value; refreshChats(); };
+  $('btnTts').onclick = async () => {
+    state.settings = await api.settings.set({ ttsAuto: !state.settings.ttsAuto });
+    renderTtsButton();
+    if (!state.settings.ttsAuto) stopAllSpeech();
+  };
+  $('btnTpl').onclick = (e) => { e.stopPropagation(); $('tplMenu').classList.toggle('hidden'); };
+  document.addEventListener('click', () => $('tplMenu').classList.add('hidden'));
   $('modelSel').onchange = () => onModelChanged(true);
   $('thinkSel').onchange = async () => { state.settings = await api.settings.set({ think: $('thinkSel').value }); };
-  $('ttsAuto').onchange = async () => { state.settings = await api.settings.set({ ttsAuto: $('ttsAuto').checked }); };
-  $('tplSel').onchange = () => {
-    const t = TEMPLATES[$('tplSel').value];
-    if (t) { $('input').value = t + $('input').value; autosize(); $('input').focus(); }
-    $('tplSel').value = '';
+  $('profileSel').onchange = async () => {
+    state.settings = await api.settings.set({ activeProfile: $('profileSel').value });
+    renderGreeting();
+    hint($('profileSel').value ? 'Profil gewählt: die KI nutzt jetzt diese Absenderangaben.' : 'Kein Profil aktiv.');
   };
   $('input').addEventListener('input', autosize);
   $('input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key !== 'Enter') return;
+    const sendOnEnter = state.settings.sendOnEnter !== false;
+    if ((sendOnEnter && !e.shiftKey && !e.ctrlKey) || (!sendOnEnter && e.ctrlKey)) { e.preventDefault(); send(); }
   });
-  // Dateien per Drag & Drop
   document.addEventListener('dragover', (e) => e.preventDefault());
   document.addEventListener('drop', async (e) => {
     e.preventDefault();
     for (const f of e.dataTransfer.files) await addFile(f.name, new Uint8Array(await f.arrayBuffer()));
   });
-  // Bilder aus der Zwischenablage
   $('input').addEventListener('paste', async (e) => {
     for (const it of e.clipboardData.items) {
       if (it.type.startsWith('image/')) {
@@ -706,12 +760,25 @@ function wire() {
       }
     }
   });
-  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  $('overlay').addEventListener('mousedown', (e) => {
+    if (e.target === $('overlay') && !$('modal').classList.contains('wide')) closeModal();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (!$('overlay').classList.contains('hidden')) closeModal();
+      else if (state.speaking) stopAllSpeech();
+    }
+  });
 }
 
 async function init() {
   state.settings = await api.settings.get();
-  $('ttsAuto').checked = state.settings.ttsAuto;
+  applyAppearance(state.settings);
+  applyIcons();
+  buildTemplateMenu();
+  renderProfileSelect();
+  renderTtsButton();
+  if (state.settings.sidebarOpen === false) toggleSidebar(false);
   wire();
   state.chat = newChat();
   await refreshStatus();

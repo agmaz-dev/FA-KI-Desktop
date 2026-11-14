@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   settings: { get: inv('settings:get'), set: inv('settings:set') },
   chats: {
     list: inv('chats:list'), load: inv('chats:load'), save: inv('chats:save'),
-    remove: inv('chats:delete'), export: inv('chats:export'),
+    remove: inv('chats:delete'), export: inv('chats:export'), clear: inv('chats:clear'),
   },
   app: { info: inv('app:info'), openDataDir: inv('app:openDataDir') },
   files: { pick: inv('files:pick') },

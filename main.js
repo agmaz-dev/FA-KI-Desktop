@@ -24,7 +24,7 @@ function createWindow() {
     height: 800,
     minWidth: 860,
     minHeight: 560,
-    backgroundColor: '#0f1115',
+    backgroundColor: '#262624',
     title: 'FA KI Desktop',
     autoHideMenuBar: true,
     webPreferences: {
@@ -78,6 +78,7 @@ function registerIpc() {
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
   ipcMain.handle('chats:delete', (_e, id) => store.deleteChat(id));
+  ipcMain.handle('chats:clear', () => store.clearChats());
   ipcMain.handle('chats:export', async (_e, { title, markdown }) => {
     const r = await dialog.showSaveDialog(win, {
       defaultPath: (title || 'Chat').replace(/[\\/:*?"<>|]/g, '_') + '.md',
@@ -179,7 +180,7 @@ function registerIpc() {
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
-  ipcMain.handle('speech:synthesize', (_e, { text, voice }) => speech.synthesize(text, voice));
+  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => speech.synthesize(text, voice, speed));
 }
 
 async function ensureTessData() {
