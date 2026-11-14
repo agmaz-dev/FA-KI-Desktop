@@ -17,6 +17,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Spracherkennung (whisper.cpp) bauen
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp wcpp
+          cmake -S wcpp -B wcpp/build -A x64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          cmake --build wcpp/build --config Release -j 4 --target whisper-cli
+          mkdir -p build-bundled/whisper
+          find wcpp/build -name whisper-cli.exe -exec cp {} build-bundled/whisper/ \;
+          ls -la build-bundled/whisper
+          test -f build-bundled/whisper/whisper-cli.exe
       - run: npm ci
       - run: npm test
       - run: npm run dist

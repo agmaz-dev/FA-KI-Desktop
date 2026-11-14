@@ -55,7 +55,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     const dataDir = app.getPath('userData');
     store = new Store(dataDir);
-    speech = new SpeechManager(dataDir, (p) => send('speech:progress', p));
+    speech = new SpeechManager(dataDir, (p) => send('speech:progress', p), app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled'));
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       cb(permission === 'media' || permission === 'clipboard-sanitized-write');
