@@ -3,7 +3,6 @@ name: Windows-Installer bauen
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -32,9 +31,16 @@ jobs:
           name: FA-KI-Desktop-Setup-${{ steps.ver.outputs.v }}
           path: dist/FA-KI-Desktop-Setup-${{ steps.ver.outputs.v }}.exe
           if-no-files-found: error
-      - name: Release erstellen
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release erstellen oder aktualisieren
+        if: github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "dist/FA-KI-Desktop-Setup-${{ steps.ver.outputs.v }}.exe" --title "FA KI Desktop ${{ steps.ver.outputs.v }}" --notes "Installationsprogramm für Windows." 
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          F="dist/FA-KI-Desktop-Setup-$V.exe"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" "$F" --clobber
+          else
+            gh release create "v$V" "$F" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramm für Windows."
+          fi
