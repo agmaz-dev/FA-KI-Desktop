@@ -115,4 +115,4 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Beim Freimachen von Port 8004 werden nur noch eigene Programme beendet.
 - `__pycache__` ist aus dem Repo und dem Installationsprogramm entfernt; adm-zip auf 0.6.1 (keine bekannten Lücken mehr).
 - Piper-Stimmen werden beim Start nur noch nachgeladen, wenn Piper auch als Stimme genutzt wird.
-- Build (Workflow-Änderung separat, siehe Pull Request): whisper.cpp auf v1.9.5 anpinnen, `whisper-server.exe` mitliefern, vorhandenes Release nicht mehr überschreiben, Pull Requests prüfen. Solange diese Änderung fehlt, nutzt die App den Rückfall `whisper-cli` (mit den schnelleren Optionen, aber Modell pro Aufnahme).
+- Build: whisper.cpp ist auf v1.9.5 angepinnt, `whisper-server.exe` wird mitgeliefert (der Build prüft das), ein vorhandenes Release wird nicht mehr überschrieben, der Workflow prüft auch Pull Requests und hat ein Zeitlimit von 45 Minuten.

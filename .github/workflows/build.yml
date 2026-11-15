@@ -3,7 +3,12 @@ name: Windows-Installer bauen
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -11,6 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      WHISPER_CPP_REF: v1.9.5 # fest angepinnt, damit der Build reproduzierbar bleibt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,18 +28,26 @@ jobs:
       - name: Spracherkennung (whisper.cpp) bauen
         shell: bash
         run: |
-          git clone --depth 1 https://github.com/ggml-org/whisper.cpp wcpp
+          git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
           cmake -S wcpp -B wcpp/build -A x64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          cmake --build wcpp/build --config Release -j 4 --target whisper-cli
+          cmake --build wcpp/build --config Release -j 4 --target whisper-cli whisper-server
           mkdir -p build-bundled/whisper
           find wcpp/build -name whisper-cli.exe -exec cp {} build-bundled/whisper/ \;
+          find wcpp/build -name whisper-server.exe -exec cp {} build-bundled/whisper/ \;
           ls -la build-bundled/whisper
           test -f build-bundled/whisper/whisper-cli.exe
+          test -f build-bundled/whisper/whisper-server.exe
       - run: npm ci
       - run: npm test
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Prüfen, ob whisper-server im Installer liegt
+        shell: bash
+        run: |
+          ls -la dist/win-unpacked/resources/whisper
+          test -f dist/win-unpacked/resources/whisper/whisper-server.exe
+          test -f dist/win-unpacked/resources/whisper/whisper-cli.exe
       - name: Version ermitteln
         id: ver
         shell: bash
@@ -50,7 +66,8 @@ jobs:
           V="${{ steps.ver.outputs.v }}"
           F="dist/FA-KI-Desktop-Setup-$V.exe"
           if gh release view "v$V" >/dev/null 2>&1; then
-            gh release upload "v$V" "$F" --clobber
+            # Kein --clobber: ein veröffentlichtes Installationsprogramm wird nie still überschrieben.
+            echo "::warning::Release v$V gibt es schon – bitte die Version in package.json erhöhen. Nichts hochgeladen."
           else
             gh release create "v$V" "$F" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramm für Windows."
           fi
