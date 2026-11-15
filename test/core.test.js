@@ -341,3 +341,57 @@ test('Türkisch-Wörter mit ç/ğ und Satzteile höchstens maxLen', () => {
     assert.strictEqual(parts.join('').replace(/\s/g, '').length, t.replace(/\s/g, '').length);
   }
 });
+
+test('Whisper: Audio-Kontext passend zur Aufnahmelänge', () => {
+  const { audioCtxFor, wavSeconds } = require('../lib/speech');
+  assert.strictEqual(audioCtxFor(2), 768);
+  assert.strictEqual(audioCtxFor(11), 768);
+  assert.ok(audioCtxFor(20) >= (20 + 2.5) * 50);
+  assert.strictEqual(audioCtxFor(29), 0);
+  assert.strictEqual(audioCtxFor(0), 0);
+  assert.strictEqual(wavSeconds(Buffer.alloc(44 + 32000 * 3)), 3);
+});
+
+test('Whisper-Server: bleibt geladen, Umlaute heil, Rückfall auf CLI', { skip: process.platform === 'win32' }, async () => {
+  const { SpeechManager } = require('../lib/speech');
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ws-'));
+  const bundled = path.join(ud, 'bundled');
+  fs.mkdirSync(path.join(bundled, 'whisper'), { recursive: true });
+  const log = path.join(ud, 'spawns.log');
+  // Nachgebauter whisper-server: zählt Starts, antwortet mit „Grüße“, Mehrbyte-Zeichen über zwei Pakete verteilt
+  const fake = path.join(bundled, 'whisper', 'whisper-server');
+  fs.writeFileSync(fake, `#!${process.execPath}
+const http = require('http'); const fs = require('fs');
+const a = process.argv; const port = Number(a[a.indexOf('--port') + 1]);
+fs.appendFileSync(${JSON.stringify(log)}, 'start\\n');
+http.createServer((req, res) => {
+  if (req.url === '/health') return res.end('{"status":"ok"}');
+  let b = []; req.on('data', (d) => b.push(d)); req.on('end', () => {
+    const body = Buffer.concat(b).toString('latin1');
+    fs.appendFileSync(${JSON.stringify(log)}, (/name="audio_ctx"\\r\\n\\r\\n(\\d+)/.exec(body) || [])[1] + ' ' + (/name="language"\\r\\n\\r\\n(\\w+)/.exec(body) || [])[1] + '\\n');
+    const out = Buffer.from(JSON.stringify({ text: ' Grüße aus München' }), 'utf8');
+    const i = out.indexOf(0xc3);
+    res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', out.length);
+    res.write(out.subarray(0, i + 1)); setTimeout(() => res.end(out.subarray(i + 1)), 30);
+  });
+}).listen(port, '127.0.0.1');
+`);
+  fs.chmodSync(fake, 0o755);
+  const sm = new SpeechManager(ud, () => {}, bundled);
+  fs.mkdirSync(path.dirname(sm.whisperModelPath('small')), { recursive: true });
+  fs.writeFileSync(sm.whisperModelPath('small'), 'x');
+  try {
+    const wav = Buffer.alloc(44 + 32000 * 3);
+    assert.strictEqual(await sm.transcribe(wav, 'de', 'small'), 'Grüße aus München');
+    assert.strictEqual(sm.lastTiming.path, 'server');
+    assert.strictEqual(await sm.transcribe(wav, 'de', 'small'), 'Grüße aus München');
+    const lines = fs.readFileSync(log, 'utf8').trim().split('\n');
+    assert.strictEqual(lines.filter((l) => l === 'start').length, 1, 'Modell darf nur einmal geladen werden');
+    assert.ok(lines.includes('768 de'));
+  } finally {
+    sm.stopWhisperServer();
+  }
+  // Ohne Server und ohne CLI: klare Meldung
+  fs.unlinkSync(fake);
+  await assert.rejects(sm.transcribe(Buffer.alloc(44 + 32000), 'de', 'small'), /nicht eingerichtet/);
+});

@@ -547,6 +547,7 @@ async function transcribeWav(wav) {
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
   if (!(await ensureStt())) return;
+  api.speech.warmStt(state.settings.sttModel).catch(() => {}); // Modell lädt, während gesprochen wird
   try { stopAllSpeech(); state.rec = await startRecording({ vad: false }); }
   catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   $('btnMic').classList.add('rec');
@@ -566,6 +567,7 @@ async function toggleMic() {
 
 async function convListen() {
   if (!state.conv || state.rec || state.streaming) return;
+  api.speech.warmStt(state.settings.sttModel).catch(() => {});
   try { state.rec = await startRecording({ vad: true }); }
   catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   hint('Ich höre zu … sprich einfach.', 0);

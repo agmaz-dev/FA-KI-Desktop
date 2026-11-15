@@ -97,6 +97,8 @@ if (!gotLock) {
         }
       } catch { /* egal, dann bleibt die vorhandene Stimme */ }
     }, 5000);
+    // Spracherkennung vorwärmen: whisper-server lädt das Modell einmal und behält es im Speicher.
+    setTimeout(() => { speech.warmStt(store.getSettings().sttModel); }, 3000);
     let st = store.getSettings();
     // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Piper
     if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
@@ -258,6 +260,7 @@ function registerIpc() {
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
+  ipcMain.handle('speech:warmStt', (_e, model) => speech.warmStt(model || store.getSettings().sttModel));
   ipcMain.handle('speech:synthesize', (_e, { text, voice, speed, piper }) => {
     const s = store.getSettings();
     if (!piper && s.ttsEngine === 'supertonic') return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
@@ -401,5 +404,6 @@ async function getOcrWorker() {
 
 app.on('before-quit', () => {
   procs.killAll();
+  if (speech) speech.stopWhisperServer();
   if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
 });
