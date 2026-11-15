@@ -395,3 +395,22 @@ http.createServer((req, res) => {
   fs.unlinkSync(fake);
   await assert.rejects(sm.transcribe(Buffer.alloc(44 + 32000), 'de', 'small'), /nicht eingerichtet/);
 });
+
+test('Downloader: Schreibfehler wird gemeldet statt abzustürzen', async () => {
+  const srv = http.createServer((req, res) => { res.setHeader('content-length', 6); res.end('abcdef'); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-dlerr-'));
+  const dest = path.join(d, 'datei.bin');
+  fs.mkdirSync(dest + '.part'); // .part ist ein Ordner -> Schreiben schlägt fehl
+  await assert.rejects(downloadFile(`http://127.0.0.1:${srv.address().port}/x`, dest), /EISDIR|illegal operation|EPERM|EACCES/);
+  srv.close();
+});
+
+test('Prozesse: fehlendes Programm wird sofort gemeldet', async () => {
+  const { Procs } = require('../lib/procs');
+  const p = new Procs();
+  const child = p._spawn('x', 'gibt-es-nicht-fa-ki-12345', []);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(child.spawnError && child.spawnError.code === 'ENOENT');
+  assert.strictEqual(await p.freePort('http://127.0.0.1:8004'), false); // ohne eigenen Ordner wird nie etwas beendet
+});

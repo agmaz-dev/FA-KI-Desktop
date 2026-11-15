@@ -335,7 +335,7 @@ function registerIpc() {
       });
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
-      await procs.freePort(voiceInst.url());
+      await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
       apply(r.cmd);
       const st = await procs.ensureTtsServer(store.getSettings());
       try {
@@ -352,7 +352,7 @@ function registerIpc() {
         return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, settings: store.getSettings() };
       } catch (e) {
         await procs.stop('tts');
-        await procs.freePort(voiceInst.url());
+        await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
         if (/oute_server\.py/.test(before.ttsServerCmd || '')) { apply(before.ttsServerCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
         else store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false });
         throw e;
