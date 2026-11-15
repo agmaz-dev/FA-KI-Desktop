@@ -75,3 +75,7 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 ## Neu in 1.8.7
 - Der Stimmen-Server wird bei jedem App-Start auf den neuesten Stand gebracht (bisher nur bei der Einrichtung, dadurch kamen Verbesserungen nie an).
 - Kontext wieder 8192 (die Stimmprobe allein braucht ca. 3400 Tokens), dazu ein einziger Platz (-np 1).
+
+## Neu in 1.8.8
+- OuteTTS nimmt automatisch die kleinere Datei OuteTTS-1.0-0.6B-Q4_0.gguf (oder Q5_0), wenn sie im Ordner voice neben der Q8-Datei liegt.
+- Speicherleck im Stimmen-Server behoben (inference_mode, Aufräumen nach jedem Satz).

@@ -39,6 +39,19 @@ LOCK = threading.Lock()
 GEN = {'n': 0}
 LLAMA_URL = f'http://127.0.0.1:{args.llama_port}'
 LLAMA_LOG = os.path.join(args.cache, 'llama-server.log')
+
+
+def _pick_gguf():
+    """Q4 > Q5 > Q8: kleinere Datei = schneller. Liegt neben der Q8-Datei, wird sie genommen."""
+    d = os.path.dirname(os.path.abspath(args.gguf))
+    for q in ('Q4_0', 'Q5_0'):
+        f = os.path.join(d, f'OuteTTS-1.0-0.6B-{q}.gguf')
+        if os.path.isfile(f):
+            return f, q
+    return args.gguf, 'Q8_0'
+
+
+GGUF, QUANT = _pick_gguf()
 TOKENIZER = 'OuteAI/OuteTTS-1.0-0.6B'
 
 
@@ -71,7 +84,7 @@ def _kill_strays():
 
 def _start_llama(ngl):
     _kill_strays()
-    cmd = [args.llama, '-m', args.gguf, '-c', '8192', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    cmd = [args.llama, '-m', GGUF, '-c', '8192', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     try:
         os.makedirs(args.cache, exist_ok=True)
@@ -191,7 +204,7 @@ def load_model():
         _patch_whisper()
         _patch_llama_tokens()
         cfg = ModelConfig(
-            model_path=args.gguf, tokenizer_path=TOKENIZER, interface_version=InterfaceVersion.V3,
+            model_path=GGUF, tokenizer_path=TOKENIZER, interface_version=InterfaceVersion.V3,
             backend=Backend.LLAMACPP_SERVER, device='cpu', max_seq_length=4096,
         )
         IFACE['i'] = Interface(cfg)
@@ -242,7 +255,9 @@ def synth(text, voice, my_gen):
 
         def run():
             try:
-                return iface.generate(GenerationConfig(
+                import torch
+                with torch.inference_mode():
+                    return iface.generate(GenerationConfig(
                     text=text, speaker=sp, generation_type=GenerationType.CHUNKED,
                     sampler_config=SamplerConfig(temperature=0.4), max_length=1800, server_host=LLAMA_URL,
                 ))
@@ -261,14 +276,18 @@ def synth(text, voice, my_gen):
             raise RuntimeError('Das Sprachmodell lieferte kein Audio. llama-server: ' + (_log_tail() or 'kein Protokoll'))
     if out is None or getattr(out, 'audio', None) is None:
         raise RuntimeError('Es wurde kein Audio erzeugt.')
+    SR = int(out.sr)
     a = out.audio.detach().cpu().float().numpy().squeeze()
+    del out
+    import gc
+    gc.collect()
     try:
         with open(os.path.join(args.cache or '.', 'tts-timing.log'), 'a', encoding='utf-8') as lf:
-            lf.write(f'{time.strftime("%H:%M:%S")} Zeichen={len(text)} Rechenzeit={time.time() - t_start:.1f}s Audio={len(a) / int(out.sr):.1f}s Geraet={STATE.get("device")}\n')
+            lf.write(f'{time.strftime("%H:%M:%S")} Zeichen={len(text)} Rechenzeit={time.time() - t_start:.1f}s Audio={len(a) / SR:.1f}s Modell={QUANT} Geraet={STATE.get("device")}\n')
     except Exception:  # noqa: BLE001
         pass
     buf = io.BytesIO()
-    sf.write(buf, a.astype('float32'), int(out.sr), format='WAV', subtype='PCM_16')
+    sf.write(buf, a.astype('float32'), SR, format='WAV', subtype='PCM_16')
     return buf.getvalue()
 
 
