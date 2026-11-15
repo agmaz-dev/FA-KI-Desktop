@@ -147,15 +147,6 @@ test('Word-Export erzeugt gültiges DOCX-Paket', () => {
   assert.ok(!/<b>x/.test(xml));
 });
 
-test('Stimmen-Einrichtung: CPU- und GPU-Python liegen getrennt', () => {
-  const { VoiceInstaller, paths } = require('../lib/voiceinstall');
-  const v = new VoiceInstaller('/tmp/ud', '/tmp/x.py', () => {});
-  assert.notStrictEqual(paths('/tmp/ud', 'cpu').py, paths('/tmp/ud', 'gpu').py);
-  assert.match(v.command('gpu'), /python-gpu/);
-  assert.doesNotMatch(v.command('cpu'), /python-gpu/);
-  assert.match(v.command('cpu'), /--port 8004/);
-});
-
 test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
   const { VOICES } = require('../lib/speech');
   assert.strictEqual(VOICES.de.names[0], 'kerstin');
@@ -163,14 +154,21 @@ test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
   assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
 
-test('OuteTTS-Einrichtung: eigener Python-Ordner und Startbefehl', () => {
+test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
   const { VoiceInstaller, paths } = require('../lib/voiceinstall');
-  const p = paths('/tmp/ud', 'oute');
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-vi-'));
+  const p = paths(ud);
   assert.match(p.py, /python-oute/);
   assert.match(p.serverPy, /oute_server\.py$/);
-  const v = new VoiceInstaller('/tmp/ud', '/tmp/x.py', () => {});
-  const c = v.command('oute');
+  const v = new VoiceInstaller(ud, '/tmp/x.py', () => {});
+  const c = v.command();
+  assert.match(c, /--port 8004/);
   assert.match(c, /--llama/);
   assert.match(c, /OuteTTS-1\.0-0\.6B-Q8_0\.gguf/);
-  assert.doesNotMatch(v.command('cpu'), /--llama/);
+  fs.mkdirSync(path.join(ud, 'voice', 'python-gpu', 'x'), { recursive: true });
+  fs.mkdirSync(path.join(ud, 'voice', 'python'), { recursive: true });
+  assert.strictEqual(v.status().oldFiles, true);
+  assert.strictEqual(v.cleanOld(), 2);
+  assert.strictEqual(v.status().oldFiles, false);
 });

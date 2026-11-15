@@ -233,98 +233,44 @@ export async function openSettings(ctx, startTab = 'general') {
     const spr = formRow('Sprechtempo', sp); spr.appendChild(spl);
     body.appendChild(spr);
     const vc = el('div', 'voice-card');
-    vc.appendChild(el('h3', null, 'Eigene Stimme (natürlich, nach Deiner Aufnahme)'));
-    vc.appendChild(el('div', 'note', 'Chatterbox spricht Deutsch und Türkisch und klingt nach Deiner Aufnahme. Die Einrichtung ist einmalig: rund 6 GB Download und Speicherplatz, je nach Leitung 20 bis 60 Minuten. Alles läuft auf diesem PC. Es rechnet auf dem Prozessor, deshalb braucht jeder Satz einige Sekunden.'));
-    const sInfo = el('div', 'note', draft.ttsSampleFile ? 'Stimmprobe: ' + draft.ttsSampleFile : 'Noch keine Stimmprobe gewählt (ohne Probe spricht eine Standardstimme).');
+    vc.appendChild(el('h3', null, 'Meine Stimme (OuteTTS, Deutsch)'));
+    vc.appendChild(el('div', 'note', 'Klingt nach Deiner Aufnahme und läuft ganz auf diesem PC. Die Einrichtung ist einmalig (mehrere GB Download). Türkisch spricht Piper.'));
+    const sInfo = el('div', 'note', draft.ttsSampleFile ? 'Stimmprobe: ' + draft.ttsSampleFile : 'Noch keine Stimmprobe gewählt. Eine saubere Aufnahme von 10 bis 18 Sekunden (WAV) genügt.');
     const bSample = el('button', 'btn small', 'Aufnahme wählen …');
     bSample.onclick = async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sInfo.textContent = 'Stimmprobe: ' + r.name; } };
-    const bSetup = el('button', 'btn small primary', vstat.installed ? 'Neu einrichten / reparieren' : 'Stimme jetzt einrichten');
-    const bGpu = el('button', 'btn small', vstat.gpuInstalled ? 'Grafikkarten-Version erneut einrichten' : 'Mit Grafikkarte beschleunigen (Versuch)');
-    const bOute = el('button', 'btn small', vstat.outeInstalled ? 'Schnelle Stimme (OuteTTS) erneut einrichten' : 'Schnelle Stimme testen (OuteTTS, nur Deutsch)');
+    const bOute = el('button', 'btn small primary', vstat.installed ? 'Neu einrichten / reparieren' : 'Meine Stimme einrichten');
     const bCancel = el('button', 'btn small', 'Abbrechen');
-    const pt = el('div', 'note', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Eigene Stimme ist installiert.' : '')));
+    const pt = el('div', 'note', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Meine Stimme ist eingerichtet.' : '')));
     pt.id = 'voiceProgText';
     const bar = el('div', 'bar'); const fill = el('div'); fill.id = 'voiceProgFill'; fill.style.cssText = 'height:100%;background:var(--accent);width:' + (VU.pct == null ? 5 : VU.pct) + '%'; bar.appendChild(fill);
     bar.style.display = VU.running ? '' : 'none';
     bCancel.style.display = VU.running ? '' : 'none';
-    bSetup.disabled = VU.running; bGpu.disabled = VU.running; bOute.disabled = VU.running;
+    bOute.disabled = VU.running;
     bCancel.onclick = () => api.voice.cancel();
-    const runSetup = async (kind) => {
-      const gpu = kind === 'gpu';
+    const runSetup = async () => {
       VU.running = true; VU.done = ''; VU.text = 'Starte …'; VU.pct = 0;
       await api.settings.set({ ttsSampleFile: draft.ttsSampleFile });
       render();
-      const r = await api.voice.setup({ mode: kind });
+      const r = await api.voice.setup();
       VU.running = false;
       const f = (x) => Number(x).toFixed(1).replace('.', ',');
-      if (r.settings) {
-        const fresh = r.settings;
-        Object.assign(draft, { ttsEngine: fresh.ttsEngine, ttsServerUrl: fresh.ttsServerUrl, ttsServerDir: fresh.ttsServerDir, ttsServerCmd: fresh.ttsServerCmd, ttsServerAuto: fresh.ttsServerAuto, ttsServerModel: fresh.ttsServerModel, ttsServerVoice: fresh.ttsServerVoice, ttsServerVoiceTr: fresh.ttsServerVoiceTr, ttsServerLangs: fresh.ttsServerLangs });
-      }
+      if (r.settings) Object.assign(draft, { ttsEngine: r.settings.ttsEngine, ttsServerUrl: r.settings.ttsServerUrl, ttsServerDir: r.settings.ttsServerDir, ttsServerCmd: r.settings.ttsServerCmd, ttsServerAuto: r.settings.ttsServerAuto, ttsServerModel: r.settings.ttsServerModel, ttsServerLangs: r.settings.ttsServerLangs });
       if (r.ok) VU.done = `Fertig (${r.device}). Erster Testsatz: ${f(r.cold)} s, zweiter: ${f(r.seconds)} s. Klick unten auf „Speichern“.`;
-      else VU.done = 'Fehler: ' + r.error + (kind !== 'cpu' ? ' Die bisherige Stimme bleibt aktiv.' : '');
+      else VU.done = 'Fehler: ' + r.error + ' Es spricht weiter Piper.';
       render();
     };
-    bSetup.onclick = () => runSetup('cpu');
-    bGpu.onclick = () => runSetup('gpu');
-    bOute.onclick = () => runSetup('oute');
-    const vrow = el('div', 'chips-row'); vrow.append(bSample, bSetup, bGpu, bOute, bCancel);
-    const gnote = el('div', 'note', 'Grafikkarte (AMD Radeon): braucht Windows 11 und den AMD-Treiber 26.2.2 oder neuer, noch einmal mehrere GB Download. Läuft sie dort nicht oder ist der Grafikspeicher durch Ollama belegt, nimmt die Stimme automatisch den Prozessor.');
-    const onote = el('div', 'note', 'OuteTTS (Test): schnelleres Sprachmodell mit Deiner Stimme, nur Deutsch. Türkisch spricht dann Piper. Einmalig mehrere GB Download (Pakete, llama-server, Modell ca. 650 MB). Die bisherige Stimme bleibt aktiv, falls etwas nicht klappt.');
-    vc.append(sInfo, vrow, gnote, onote, bar, pt);
+    bOute.onclick = runSetup;
+    const vrow = el('div', 'chips-row'); vrow.append(bSample, bOute, bCancel);
+    vc.append(sInfo, vrow, bar, pt);
+    if (vstat.oldFiles) {
+      const bOld = el('button', 'btn small', 'Alte Dateien löschen (Chatterbox, Grafikkarte)');
+      bOld.onclick = async () => { await api.voice.cleanOld(); VU.done = 'Alte Dateien gelöscht.'; render(); };
+      vc.appendChild(el('div', 'note', 'Von früheren Versionen liegen noch mehrere GB Reste auf dem PC.'));
+      vc.appendChild(bOld);
+    }
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
     body.appendChild(vc);
-    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (lokal, einfach, solide)'], ['server', 'Eigener Stimmen-Server (beste Qualität)']], draft.ttsEngine), 'ttsEngine'), 'Ein Stimmen-Server (z. B. Chatterbox) klingt viel natürlicher, muss aber separat auf diesem PC laufen. Nutzt eine OpenAI-kompatible Adresse.'));
-    if (draft.ttsEngine === 'server') {
-      const sv = el('div');
-      const url = bind(input('text', draft.ttsServerUrl), 'ttsServerUrl');
-      sv.appendChild(formRow('Adresse des Stimmen-Servers', url, 'Standard bei Chatterbox: http://127.0.0.1:8004'));
-      const two2 = el('div', 'two');
-      two2.appendChild(formRow('Stimme (Deutsch)', bind(input('text', draft.ttsServerVoice, { placeholder: 'Name der Stimme' }), 'ttsServerVoice')));
-      two2.appendChild(formRow('Stimme (Türkisch)', bind(input('text', draft.ttsServerVoiceTr, { placeholder: 'leer = wie Deutsch' }), 'ttsServerVoiceTr')));
-      sv.appendChild(two2);
-      const chk = el('button', 'btn small', 'Verbindung prüfen');
-      const res = el('div', 'note', '');
-      chk.onclick = async () => {
-        res.textContent = 'Prüfe …';
-        const r = await api.speech.serverVoices(draft.ttsServerUrl);
-        res.textContent = r.ok ? (r.voices.length ? 'Verbunden. Gefundene Stimmen: ' + r.voices.slice(0, 12).join(', ') : 'Verbunden (keine Stimmenliste gefunden, Namen von Hand eintragen).') : 'Nicht erreichbar. Läuft der Stimmen-Server?';
-      };
-      sv.append(chk, res);
-      const sampleRow = el('div', 'form-row');
-      sampleRow.appendChild(el('label', null, 'Meine Stimmprobe'));
-      const sampleInfo = el('div', 'note', draft.ttsSampleFile ? 'Gewählt: ' + draft.ttsSampleFile : 'Noch keine Probe gewählt. Eine saubere Aufnahme von 10 bis 20 Sekunden (WAV) genügt.');
-      const pick = el('button', 'btn small', 'Aufnahme wählen …');
-      pick.onclick = async () => {
-        const r = await api.speech.pickSample();
-        if (!r) return;
-        draft.ttsSampleFile = r.name;
-        sampleInfo.textContent = 'Gewählt: ' + r.name + '. ' + r.notes.join(' ');
-      };
-      sampleRow.append(pick, sampleInfo);
-      sv.appendChild(sampleRow);
-      const dirIn = bind(input('text', draft.ttsServerDir, { placeholder: 'z. B. C:\\Chatterbox-TTS-Server' }), 'ttsServerDir');
-      const dirRow = formRow('Ordner des Stimmen-Servers', dirIn, 'Wird für den automatischen Start und zum Ablegen der Stimmprobe genutzt.');
-      const dirPick = el('button', 'btn small', 'Ordner wählen …');
-      dirPick.onclick = async () => { const f = await api.app.pickFolder(); if (f) { draft.ttsServerDir = f; dirIn.value = f; } };
-      dirRow.appendChild(dirPick);
-      sv.appendChild(dirRow);
-      sv.appendChild(formRow('Startbefehl', bind(input('text', draft.ttsServerCmd, { placeholder: 'python server.py' }), 'ttsServerCmd'), 'Wird im Ordner oben ausgeführt.'));
-      const au = switchRow('Stimmen-Server mit der App starten', 'Startet den Server beim Öffnen der App im Hintergrund und beendet ihn beim Schließen.', draft.ttsServerAuto);
-      bind(au.cb, 'ttsServerAuto');
-      sv.appendChild(au.row);
-      const startNow = el('button', 'btn small', 'Server jetzt starten');
-      const startRes = el('div', 'note', '');
-      startNow.onclick = async () => {
-        startRes.textContent = 'Starte … (das erste Laden kann eine Minute dauern)';
-        await api.settings.set({ ttsServerDir: draft.ttsServerDir, ttsServerCmd: draft.ttsServerCmd, ttsServerUrl: draft.ttsServerUrl });
-        const r = await api.speech.startServer();
-        startRes.textContent = r.ok ? (r.started ? 'Server läuft jetzt.' : 'Server lief schon.') : 'Fehler: ' + r.error;
-      };
-      sv.append(startNow, startRes);
-      sv.style.marginBottom = '12px';
-      body.appendChild(sv);
-    }
+    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (schnell: deutsche Frauenstimme, türkische Stimme)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Piper automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');

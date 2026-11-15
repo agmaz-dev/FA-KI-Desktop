@@ -44,3 +44,9 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.7.4
 - Deutsche Piper-Notfallstimme: kerstin (weiblich) zuerst, dann eva_k, dann pavoque (männlich), Thorsten zuletzt.
+
+## Neu in 1.8.0 – aufgeräumt
+- Entfernt: Chatterbox, Grafikkarten-/ROCm-Einrichtung, Server-Felder (Adresse, Ordner, Startbefehl, Autostart-Schalter). Die Sprache-Seite hat nur noch: Stimme/Tempo, „Meine Stimme (OuteTTS)“ mit einem Knopf, Stimmen-Motor, Test/Stopp und die Piper-Bausteine.
+- Fällt der Stimmen-Server aus, spricht Piper (statt sofort die Windows-Stimme).
+- Knopf „Alte Dateien löschen“ entfernt die Reste von Chatterbox und dem Grafikkarten-Python (mehrere GB).
+- Alte Einstellungen mit Chatterbox-Startbefehl werden beim Start automatisch auf Piper zurückgesetzt.

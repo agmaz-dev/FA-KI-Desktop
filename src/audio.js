@@ -225,7 +225,15 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
         if (token !== session) return;
         pump(i + depth);
         if (cur) await playBytes(cur, token);
-        else await speakWindows(sentences[i], lang, speed, token);
+        else {
+          let alt = null;
+          if (serverMode && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]) {
+            try { alt = await window.api.speech.synthesize({ text: sentences[i], voice: lang, speed, piper: true }); } catch { alt = null; }
+          }
+          if (token !== session) return;
+          if (alt) await playBytes(alt, token);
+          else await speakWindows(sentences[i], lang, speed, token);
+        }
         if (token !== session) return;
       }
     } else {

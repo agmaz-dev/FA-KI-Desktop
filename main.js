@@ -67,10 +67,15 @@ if (!gotLock) {
     });
     session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === 'media');
 
-    voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'voice_server.py'), (p) => send('voice:progress', p));
+    voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'oute_server.py'), (p) => send('voice:progress', p));
     registerIpc();
     createWindow();
-    const st = store.getSettings();
+    let st = store.getSettings();
+    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Piper
+    if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
+      store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false, ttsServerCmd: '', ttsServerLangs: 'all' });
+      st = store.getSettings();
+    }
     if (st.autoStartOllama && /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(st.ollamaUrl)) {
       procs.ensureOllama(st.ollamaUrl).then((r) => send('app:ollamaStart', r)).catch(() => {});
     }
@@ -202,9 +207,9 @@ function registerIpc() {
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
-  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => {
+  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed, piper }) => {
     const s = store.getSettings();
-    if (s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
+    if (!piper && s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return speech.synthesize(text, voice, speed);
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
@@ -240,28 +245,25 @@ function registerIpc() {
   });
   ipcMain.handle('voice:status', () => voiceInst.status());
   ipcMain.handle('voice:cancel', () => { voiceInst.cancel(); return true; });
-  ipcMain.handle('voice:setup', async (_e, opts) => {
-    const mode = opts && opts.mode ? String(opts.mode) : (opts && opts.gpu ? 'gpu' : 'cpu');
+  ipcMain.handle('voice:cleanOld', () => ({ removed: voiceInst.cleanOld() }));
+  ipcMain.handle('voice:setup', async () => {
     const before = store.getSettings();
     try {
-      const r = await voiceInst.install(mode);
+      const r = await voiceInst.install();
       const sample = before.ttsSampleFile || '';
-      const apply = (cmd, langs) => store.setSettings({
+      const apply = (cmd) => store.setSettings({
         ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: cmd,
-        ttsServerAuto: true, ttsServerModel: 'chatterbox', ttsServerVoice: '', ttsServerVoiceTr: '', ttsServerLangs: langs,
+        ttsServerAuto: true, ttsServerModel: 'oute', ttsServerVoice: '', ttsServerVoiceTr: '', ttsServerLangs: 'de',
       });
-      const oldCmd = before.ttsServerCmd;
-      const oldLangs = before.ttsServerLangs || 'all';
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
       await procs.freePort(voiceInst.url());
-      apply(r.cmd, mode === 'oute' ? 'de' : 'all');
-      let st = await procs.ensureTtsServer(store.getSettings());
+      apply(r.cmd);
+      const st = await procs.ensureTtsServer(store.getSettings());
       try {
         if (!st.ok) throw new Error(st.error);
         const ready = await voiceInst.waitReady();
-        const want = mode === 'oute' ? 'oute' : 'chatterbox';
-        if ((ready.engine || 'chatterbox') !== want) {
+        if (ready.engine !== 'oute') {
           throw new Error('Auf Port 8004 läuft noch ein alter Stimmen-Server und hat den neuen verdrängt. Beende die App, im Task-Manager alle „python.exe“ (Details) und starte sie neu.');
         }
         send('voice:progress', { text: 'Testsatz wird erzeugt (1/2) …', pct: 92 });
@@ -269,11 +271,12 @@ function registerIpc() {
         send('voice:progress', { text: 'Testsatz wird erzeugt (2/2) …', pct: 96 });
         const warm = await voiceInst.benchmark(sample);
         send('voice:progress', { text: 'Fertig.', pct: 100 });
-        return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, mode, settings: store.getSettings() };
+        return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, settings: store.getSettings() };
       } catch (e) {
-        // Neue Einrichtung läuft nicht: alten Stand wiederherstellen
         await procs.stop('tts');
-        if (oldCmd) { apply(oldCmd, oldLangs); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
+        await procs.freePort(voiceInst.url());
+        if (/oute_server\.py/.test(before.ttsServerCmd || '')) { apply(before.ttsServerCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
+        else store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false });
         throw e;
       }
     } catch (e) {

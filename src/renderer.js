@@ -482,7 +482,7 @@ async function speakNow(text, settingsOverride) {
       speed: s.ttsSpeed || 1,
       engine: s.ttsEngine || 'piper',
       serverLangs: s.ttsServerLangs || 'all',
-      onWarn: (m) => hint('Stimmen-Server nicht erreichbar, es spricht die Windows-Stimme: ' + m, 0),
+      onWarn: (m) => hint('Meine Stimme (OuteTTS) ist gerade nicht bereit, es spricht Piper bzw. die Windows-Stimme: ' + m, 0),
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
