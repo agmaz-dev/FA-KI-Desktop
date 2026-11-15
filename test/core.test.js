@@ -158,8 +158,8 @@ test('Stimmen-Einrichtung: CPU- und GPU-Python liegen getrennt', () => {
 
 test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
   const { VOICES } = require('../lib/speech');
-  assert.strictEqual(VOICES.de.names[0], 'pavoque');
-  assert.ok(VOICES.de.names.indexOf('kerstin') < VOICES.de.names.indexOf('thorsten'));
+  assert.strictEqual(VOICES.de.names[0], 'kerstin');
+  assert.ok(VOICES.de.names.indexOf('pavoque') < VOICES.de.names.indexOf('thorsten'));
   assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
 

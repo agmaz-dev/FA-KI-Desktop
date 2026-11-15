@@ -41,3 +41,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.7.3
 - Alten Stimmen-Server auf Port 8004 beenden funktioniert jetzt auch auf deutschem Windows (netstat schreibt dort „ABHÖREN“ statt „LISTENING“). Beim Einrichten wird zusätzlich geprüft, dass wirklich der neue Server (OuteTTS bzw. Chatterbox) antwortet.
+
+## Neu in 1.7.4
+- Deutsche Piper-Notfallstimme: kerstin (weiblich) zuerst, dann eva_k, dann pavoque (männlich), Thorsten zuletzt.
