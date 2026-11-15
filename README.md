@@ -32,3 +32,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.7.0
 - **OuteTTS (Test):** Einstellungen → Sprache → „Schnelle Stimme testen (OuteTTS, nur Deutsch)“. Eigenes Python 3.11, llama-server (Vulkan, läuft auf AMD-Grafikkarten) und das Modell OuteTTS-1.0-0.6B (Q8). Klont Deine Stimme aus der gewählten Aufnahme (einmalig mit Whisper). Türkisch ist nicht trainiert und wird automatisch von Piper gesprochen. Schlägt etwas fehl, bleibt die bisherige Stimme aktiv.
+
+## Neu in 1.7.1
+- OuteTTS-Einrichtung: Platzhalter für `llama_cpp` (die Bibliothek verlangt es beim Import, das Modell läuft aber im llama-server). Behebt „llama.cpp Python bindings not found“.
