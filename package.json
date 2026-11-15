@@ -1,7 +1,7 @@
 {
   "name": "fa-ki-desktop",
   "productName": "FA KI Desktop",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "Deutsche Desktop-App für lokale KI mit Ollama: Chat, PDF-Lesen, Spracheingabe und Vorlesen",
   "main": "main.js",
   "author": "Feridun Agmaz",

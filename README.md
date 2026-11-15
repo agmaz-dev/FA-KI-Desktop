@@ -58,3 +58,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.8.2
 - Deutsch spricht nur noch Piper „kerstin“ (Frauenstimme); alle Männerstimmen sind aus der Auswahl entfernt.
+
+## Neu in 1.8.3
+- OuteTTS: Token-IDs werden direkt vom llama-server geholt (neuere Versionen blenden die Audio-Codes im Text aus, deshalb kam kein Audio).

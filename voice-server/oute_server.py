@@ -107,6 +107,31 @@ def _to_cpu():
     return True
 
 
+def _patch_llama_tokens():
+    """Neuere llama-server blenden Steuer-Tokens (<|c1_..|>) im Text aus: die Token-IDs direkt abholen."""
+    import requests
+    from urllib.parse import urljoin
+    import outetts.models.llamacpp_server as ls
+
+    def _generate(self, input_ids, config):
+        body = {
+            'prompt': input_ids, 'stream': False, 'return_tokens': True, 'n_predict': config.max_length,
+            'top_p': config.sampler_config.top_p, 'top_k': config.sampler_config.top_k,
+            'min_p': config.sampler_config.min_p if hasattr(config.sampler_config, 'min_p') else 0.05,
+            'repeat_penalty': config.sampler_config.repetition_penalty,
+            'temperature': config.sampler_config.temperature, 'stop': ['<|im_end|>'],
+        }
+        r = requests.post(urljoin(config.server_host, '/completion'), json=body, timeout=600)
+        r.raise_for_status()
+        d = r.json()
+        toks = d.get('tokens')
+        if toks:
+            return [int(t) for t in toks]
+        return self.tokenizer.encode(d.get('content', ''), add_special_tokens=False)
+
+    ls.LlamaCPPServerModel._generate = _generate
+
+
 def _patch_whisper():
     """openai-whisper ruft sonst ffmpeg auf (unter Windows nicht vorhanden): Audio selbst laden."""
     import numpy as np
@@ -148,6 +173,7 @@ def load_model():
         import outetts
         from outetts import Backend, Interface, InterfaceVersion, ModelConfig
         _patch_whisper()
+        _patch_llama_tokens()
         cfg = ModelConfig(
             model_path=args.gguf, tokenizer_path=TOKENIZER, interface_version=InterfaceVersion.V3,
             backend=Backend.LLAMACPP_SERVER, device='cpu', max_seq_length=4096,
