@@ -331,3 +331,13 @@ test('Ollama: Fehler mitten im Stream schließt die Verbindung, Abbruch und Umla
   assert.ok(closed, 'Abbruch muss die Verbindung schließen');
   srv.close();
 });
+
+test('Türkisch-Wörter mit ç/ğ und Satzteile höchstens maxLen', () => {
+  assert.strictEqual(detectLang('Bu kitap çok güzel ve ben de var'), 'tr');
+  assert.strictEqual(detectLang('Das ist ein ganz normaler deutscher Satz mit ne Menge Wörter.'), 'de');
+  for (const t of ['a'.repeat(700), ('wort ').repeat(200), ('x,').repeat(400)]) {
+    const parts = splitSentences(t, 280);
+    assert.ok(parts.every((p) => p.length <= 280), JSON.stringify(parts.map((p) => p.length)));
+    assert.strictEqual(parts.join('').replace(/\s/g, '').length, t.replace(/\s/g, '').length);
+  }
+});
