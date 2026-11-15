@@ -279,6 +279,12 @@ export async function openSettings(ctx, startTab = 'general') {
     bOute.disabled = VU.running;
     bCancel.onclick = () => api.voice.cancel();
     const runSetup = async () => {
+      // Ohne Stimmprobe kann OuteTTS nicht sprechen: vor dem großen Download (mehrere GB) prüfen.
+      if (!draft.ttsSampleFile) {
+        VU.done = 'Bitte zuerst über „Aufnahme wählen …“ eine Stimmprobe (10–18 Sekunden, WAV) auswählen. Ohne Aufnahme kann „Meine Stimme“ nicht sprechen.';
+        render();
+        return;
+      }
       VU.running = true; VU.done = ''; VU.text = 'Starte …'; VU.pct = 0;
       await api.settings.set({ ttsSampleFile: draft.ttsSampleFile });
       render();

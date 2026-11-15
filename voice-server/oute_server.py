@@ -59,6 +59,10 @@ class Cancelled(Exception):
     pass
 
 
+class NoSample(Exception):
+    pass
+
+
 def _health(timeout=2):
     try:
         with urllib.request.urlopen(LLAMA_URL + '/health', timeout=timeout) as r:
@@ -225,7 +229,7 @@ def get_speaker(voice):
     """Stimmprofil aus der Aufnahme (einmalig, dauert; danach als .oute.json gespeichert)."""
     vp = voice_path(voice)
     if not vp:
-        raise RuntimeError('Stimmprobe nicht gefunden – bitte in den Einstellungen eine Aufnahme wählen.')
+        raise NoSample('Keine Stimmprobe gewählt oder Datei fehlt – bitte in den Einstellungen unter „Meine Stimme“ eine Aufnahme wählen.')
     if vp in SPEAKERS:
         return SPEAKERS[vp]
     prof = vp + '.oute.json'
@@ -346,6 +350,8 @@ class H(BaseHTTPRequestHandler):
             wav = synth(text, req.get('voice'), my_gen)
         except Cancelled:
             return self._send(499, {'error': 'abgebrochen'})
+        except NoSample as e:
+            return self._send(422, {'error': str(e)})
         except Exception as e:  # noqa: BLE001
             return self._send(500, {'error': f'{type(e).__name__}: {e}'})
         return self._send(200, wav, 'audio/wav')

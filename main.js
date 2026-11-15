@@ -304,6 +304,10 @@ function registerIpc() {
   ipcMain.handle('voice:cleanOld', () => ({ removed: voiceInst.cleanOld() }));
   ipcMain.handle('voice:setup', async () => {
     const before = store.getSettings();
+    const sampleName = path.basename(String(before.ttsSampleFile || ''));
+    if (!sampleName || !fs.existsSync(path.join(app.getPath('userData'), 'voices', sampleName))) {
+      return { ok: false, error: 'Keine Stimmprobe gefunden. Bitte zuerst „Aufnahme wählen …“ und eine 10–18 Sekunden lange WAV-Aufnahme auswählen – erst dann wird geladen.', settings: before };
+    }
     try {
       const r = await voiceInst.install();
       const sample = before.ttsSampleFile || '';
