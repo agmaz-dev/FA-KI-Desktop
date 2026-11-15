@@ -252,3 +252,45 @@ test('Whisper-Ausgabe: Umlaut über Blockgrenze bleibt heil', async () => {
   const { out } = await run(process.execPath, ['-e', script], { timeoutMs: 10000 });
   assert.strictEqual(out, 'Grüße');
 });
+
+test('Supertonic: Stopp verwirft laufende und wartende Sätze', async () => {
+  const { Supertonic, MODEL_FILES, VOICES } = require('../lib/supertonic');
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-stc-'));
+  const calls = [];
+  class Tensor { constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; } }
+  const ort = {
+    Tensor,
+    InferenceSession: {
+      create: async (file) => ({
+        run: async (f) => {
+          const n = path.basename(file, '.onnx');
+          calls.push(n);
+          await new Promise((r) => setTimeout(r, 10));
+          if (n === 'duration_predictor') return { duration: { data: [1.0] } };
+          if (n === 'text_encoder') return { text_emb: new Tensor('float32', new Float32Array(4), [1, 2, 2]) };
+          if (n === 'vector_estimator') return { denoised_latent: { data: f.noisy_latent.data } };
+          return { wav_tts: { data: new Float32Array(f.latent.dims[2] * 512 * 2).fill(0.1) } };
+        },
+      }),
+    },
+  };
+  const s = new Supertonic(ud, () => {}, ort);
+  for (const f of MODEL_FILES) {
+    fs.mkdirSync(path.dirname(s.file(f)), { recursive: true });
+    fs.writeFileSync(s.file(f), f === 'onnx/tts.json' ? JSON.stringify({ ae: { sample_rate: 1000, base_chunk_size: 10 }, ttl: { chunk_compress_factor: 2, latent_dim: 3 } }) : f === 'onnx/unicode_indexer.json' ? JSON.stringify(Array.from({ length: 400 }, (_, i) => i)) : 'x');
+  }
+  fs.mkdirSync(path.join(s.dir, 'voice_styles'), { recursive: true });
+  fs.writeFileSync(path.join(s.dir, 'voice_styles', VOICES.elena.id + '.json'), JSON.stringify({ style_ttl: { data: [[[1, 2], [3, 4]]], dims: [1, 2, 2] }, style_dp: { data: [[[1, 2]]], dims: [1, 1, 2] } }));
+  // Drei vorab angestoßene Sätze (wie beim Vorlesen), dann Stopp mitten im ersten
+  const jobs = ['Erster Satz.', 'Zweiter Satz.', 'Dritter Satz.'].map((t) => s.synthesize(t, 'de', 'elena', 1, 8));
+  while (!calls.includes('vector_estimator')) await new Promise((r) => setTimeout(r, 2));
+  s.cancel();
+  const res = await Promise.allSettled(jobs);
+  assert.ok(res.every((r) => r.status === 'rejected' && /abgebrochen/.test(r.reason.message)));
+  assert.strictEqual(calls.filter((c) => c === 'duration_predictor').length, 1, 'wartende Sätze dürfen nicht starten');
+  assert.ok(!calls.includes('vocoder'), 'abgebrochener Satz darf nicht fertig gerechnet werden');
+  assert.ok(calls.filter((c) => c === 'vector_estimator').length < 8);
+  // Nach dem Stopp funktioniert neues Vorlesen wieder
+  const wav = await s.synthesize('Neu.', 'de', 'elena', 1, 2);
+  assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
+});

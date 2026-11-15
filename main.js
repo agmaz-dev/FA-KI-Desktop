@@ -249,7 +249,7 @@ function registerIpc() {
     if (!piper && s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return speech.synthesize(text, voice, speed);
   });
-  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); return true; });
+  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); supertonic.cancel(); return true; });
   ipcMain.handle('supertonic:setup', async () => {
     try {
       await supertonic.prepare();
@@ -263,7 +263,13 @@ function registerIpc() {
     }
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
-  ipcMain.handle('speech:cancelSynth', () => speech.cancelServer(store.getSettings().ttsServerUrl));
+  ipcMain.handle('speech:cancelSynth', async () => {
+    // Stopp gilt für alle Stimmen-Motoren: Supertonic (läuft in der App) und den OuteTTS-Server.
+    supertonic.cancel();
+    const s = store.getSettings();
+    if (s.ttsEngine === 'server') await speech.cancelServer(s.ttsServerUrl);
+    return true;
+  });
   ipcMain.handle('speech:startServer', () => procs.ensureTtsServer(store.getSettings()));
   ipcMain.handle('speech:pickSample', async () => {
     const r = await dialog.showOpenDialog(win, {
