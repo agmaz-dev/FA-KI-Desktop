@@ -22,7 +22,7 @@ ap.add_argument('--voices', default='voices')
 ap.add_argument('--cache', default='')
 ap.add_argument('--llama', required=True, help='Pfad zu llama-server.exe')
 ap.add_argument('--gguf', required=True, help='Pfad zur OuteTTS-GGUF-Datei')
-ap.add_argument('--llama-port', type=int, default=8081)
+ap.add_argument('--llama-port', type=int, default=0, help='0 = freien Port automatisch wählen')
 ap.add_argument('--whisper', default='base', help='Whisper-Modell für die Stimmprobe (einmalig)')
 args = ap.parse_args()
 
@@ -33,16 +33,31 @@ os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
 STATE = {'engine': 'oute', 'state': 'loading', 'detail': 'Modell wird gestartet …', 'device': '', 'langs': ['de']}
-IFACE = {'i': None, 'proc': None}
+IFACE = {'i': None, 'proc': None, 'log': None}
 SPEAKERS = {}
 LOCK = threading.Lock()
 GEN = {'n': 0}
-LLAMA_URL = f'http://127.0.0.1:{args.llama_port}'
+
+
+def _free_port():
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+# Fester Port 8081 kollidierte mit anderen Programmen (dann antwortete evtl. ein fremder Server auf /health).
+LLAMA_PORT = args.llama_port or _free_port()
+LLAMA_URL = f'http://127.0.0.1:{LLAMA_PORT}'
 LLAMA_LOG = os.path.join(args.cache, 'llama-server.log')
 
 
 def _pick_gguf():
-    """Q4 > Q5 > Q8: kleinere Datei = schneller. Liegt neben der Q8-Datei, wird sie genommen."""
+    """Q4 > Q5 > Q8: kleinere Datei = schneller.
+
+    Die App lädt nur die Q8-Datei herunter. Q4/Q5 werden nur benutzt, wenn man sie selbst
+    (gleicher Dateiname-Aufbau) neben die Q8-Datei legt – siehe README.
+    """
     d = os.path.dirname(os.path.abspath(args.gguf))
     for q in ('Q4_0', 'Q5_0'):
         f = os.path.join(d, f'OuteTTS-1.0-0.6B-{q}.gguf')
@@ -88,11 +103,13 @@ def _kill_strays():
 
 def _start_llama(ngl):
     _kill_strays()
-    cmd = [args.llama, '-m', GGUF, '-c', '8192', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    cmd = [args.llama, '-m', GGUF, '-c', '8192', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(LLAMA_PORT)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     try:
         os.makedirs(args.cache, exist_ok=True)
+        _close_log()
         logf = open(LLAMA_LOG, 'wb')
+        IFACE['log'] = logf
     except Exception:  # noqa: BLE001
         logf = subprocess.DEVNULL
     proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, creationflags=flags, cwd=os.path.dirname(args.llama))
@@ -108,6 +125,17 @@ def _start_llama(ngl):
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+def _close_log():
+    """Protokoll-Datei des vorigen llama-server schließen (sonst bleibt bei jedem Neustart ein Handle offen)."""
+    f = IFACE.get('log')
+    IFACE['log'] = None
+    if f:
+        try:
+            f.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _stop_llama():
