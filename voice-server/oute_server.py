@@ -38,6 +38,7 @@ SPEAKERS = {}
 LOCK = threading.Lock()
 GEN = {'n': 0}
 LLAMA_URL = f'http://127.0.0.1:{args.llama_port}'
+LLAMA_LOG = os.path.join(args.cache, 'llama-server.log')
 TOKENIZER = 'OuteAI/OuteTTS-1.0-0.6B'
 
 
@@ -54,9 +55,14 @@ def _health(timeout=2):
 
 
 def _start_llama(ngl):
-    cmd = [args.llama, '-m', args.gguf, '-c', '4096', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    cmd = [args.llama, '-m', args.gguf, '-c', '8192', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, cwd=os.path.dirname(args.llama))
+    try:
+        os.makedirs(args.cache, exist_ok=True)
+        logf = open(LLAMA_LOG, 'wb')
+    except Exception:  # noqa: BLE001
+        logf = subprocess.DEVNULL
+    proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, creationflags=flags, cwd=os.path.dirname(args.llama))
     t0 = time.time()
     while time.time() - t0 < 180:
         if proc.poll() is not None:
@@ -78,6 +84,27 @@ def _stop_llama():
             p.kill()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _log_tail(n=500):
+    try:
+        with open(LLAMA_LOG, 'rb') as f:
+            return f.read()[-n:].decode('utf-8', 'replace').strip()
+    except Exception:  # noqa: BLE001
+        return ''
+
+
+def _to_cpu():
+    """Grafikkarten-Ausgabe unbrauchbar: llama-server auf dem Prozessor neu starten."""
+    _stop_llama()
+    time.sleep(1)
+    proc = _start_llama(0)
+    if proc is None:
+        return False
+    IFACE['proc'] = proc
+    STATE['device'] = 'cpu'
+    STATE['detail'] = 'Bereit (OuteTTS, Prozessor)'
+    return True
 
 
 def _patch_whisper():
@@ -170,10 +197,25 @@ def synth(text, voice, my_gen):
             raise Cancelled()
         iface = IFACE['i']
         sp = get_speaker(voice)
-        out = iface.generate(GenerationConfig(
-            text=text, speaker=sp, generation_type=GenerationType.CHUNKED,
-            sampler_config=SamplerConfig(temperature=0.4), max_length=4096, server_host=LLAMA_URL,
-        ))
+
+        def run():
+            try:
+                return iface.generate(GenerationConfig(
+                    text=text, speaker=sp, generation_type=GenerationType.CHUNKED,
+                    sampler_config=SamplerConfig(temperature=0.4), max_length=3000, server_host=LLAMA_URL,
+                ))
+            except Exception as e:  # noqa: BLE001
+                if 'non-empty list' in str(e) or 'Tensors' in str(e):
+                    return None  # keine Audio-Tokens vom llama-server
+                raise
+
+        out = run()
+        if (out is None or getattr(out, 'audio', None) is None) and STATE.get('device') == 'gpu':
+            STATE['detail'] = 'Grafikkarte liefert kein Audio, Prozessor wird versucht …'
+            if _to_cpu():
+                out = run()
+        if out is None or getattr(out, 'audio', None) is None:
+            raise RuntimeError('Das Sprachmodell lieferte kein Audio. llama-server: ' + (_log_tail() or 'kein Protokoll'))
     if out is None or getattr(out, 'audio', None) is None:
         raise RuntimeError('Es wurde kein Audio erzeugt.')
     a = out.audio.detach().cpu().float().numpy().squeeze()

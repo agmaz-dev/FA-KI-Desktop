@@ -50,3 +50,8 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Fällt der Stimmen-Server aus, spricht Piper (statt sofort die Windows-Stimme).
 - Knopf „Alte Dateien löschen“ entfernt die Reste von Chatterbox und dem Grafikkarten-Python (mehrere GB).
 - Alte Einstellungen mit Chatterbox-Startbefehl werden beim Start automatisch auf Piper zurückgesetzt.
+
+## Neu in 1.8.1
+- OuteTTS: liefert die Grafikkarte kein Audio, startet der Stimmen-Server automatisch auf dem Prozessor neu und versucht es erneut.
+- Protokoll des llama-servers (voice/hf-cache/llama-server.log); die Fehlermeldung zeigt dessen Ende.
+- Größerer Kontext (8192) für das Sprachmodell.
