@@ -167,8 +167,10 @@ function playBytes(bytes, token) {
 /** Schneidet den ersten Satz an einem Komma kurz, damit die Stimme früher anfängt. */
 function shortFirst(sentences) {
   const f = sentences[0] || '';
-  if (f.length <= 90) return sentences;
-  const m = f.slice(0, 110).match(/^(.{35,110}?[,;:])\s/);
+  if (f.length <= 45) return sentences;
+  // Ersten Satzteil sehr kurz halten (ca. 6–8 Wörter), damit das erste Wort früh kommt.
+  let m = f.slice(0, 70).match(/^(.{18,70}?[,;:])\s/);
+  if (!m) m = f.slice(0, 55).match(/^(.{25,55})\s/);
   if (!m) return sentences;
   return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
 }

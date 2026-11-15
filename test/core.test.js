@@ -155,3 +155,10 @@ test('Stimmen-Einrichtung: CPU- und GPU-Python liegen getrennt', () => {
   assert.doesNotMatch(v.command('cpu'), /python-gpu/);
   assert.match(v.command('cpu'), /--port 8004/);
 });
+
+test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
+  const { VOICES } = require('../lib/speech');
+  assert.strictEqual(VOICES.de.names[0], 'pavoque');
+  assert.ok(VOICES.de.names.indexOf('kerstin') < VOICES.de.names.indexOf('thorsten'));
+  assert.strictEqual(VOICES.tr.names[0], 'dfki');
+});

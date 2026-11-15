@@ -24,3 +24,8 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - **Grafikkarte (Versuch):** Einstellungen → Sprache → „Mit Grafikkarte beschleunigen“ richtet ein zweites Python 3.12 mit AMD-ROCm-PyTorch ein (Windows 11, AMD-Treiber 26.2.2 oder neuer). Läuft es nicht oder ist der Grafikspeicher knapp, nutzt der Stimmen-Server automatisch den Prozessor. Die bisherige Stimme bleibt bei Fehlern aktiv.
 - `setuptools<81` wird mitinstalliert (Wasserzeichen-Modul von Chatterbox braucht `pkg_resources`).
 - Vorlesen: mehrere Sätze werden vorab erzeugt, der erste Satz wird kürzer geschnitten, „Stopp“ bricht auch den Stimmen-Server ab, Zeitlimit auf 5 Minuten, ein Wiederholungsversuch pro Satz.
+
+## Neu in 1.6.0
+- Beim Einrichten der Stimme wird ein noch laufender alter Stimmen-Server auf dem Port beendet (vorher blieb er stehen und die Grafikkarten-Version wurde nicht benutzt).
+- Piper-Notfallstimmen: Deutsch bevorzugt pavoque, dann kerstin (Thorsten nur noch zuletzt); Türkisch bevorzugt dfki.
+- Der erste Satzteil beim Vorlesen mit dem Stimmen-Server ist kürzer (ca. 6–8 Wörter), damit das erste Wort früher kommt.

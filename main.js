@@ -253,6 +253,7 @@ function registerIpc() {
       const oldCmd = before.ttsServerCmd;
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
+      await procs.freePort(voiceInst.url());
       apply(r.cmd);
       let st = await procs.ensureTtsServer(store.getSettings());
       try {
