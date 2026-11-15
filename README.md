@@ -35,3 +35,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.7.1
 - OuteTTS-Einrichtung: Platzhalter für `llama_cpp` (die Bibliothek verlangt es beim Import, das Modell läuft aber im llama-server). Behebt „llama.cpp Python bindings not found“.
+
+## Neu in 1.7.2
+- OuteTTS-Einrichtung: sucht das llama-server-Paket in den letzten 12 llama.cpp-Releases (das neueste hatte noch keine Windows-Dateien) und nennt bei Misserfolg die Anzahl der Dateien.
