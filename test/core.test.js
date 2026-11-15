@@ -172,3 +172,17 @@ test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
   assert.strictEqual(v.cleanOld(), 2);
   assert.strictEqual(v.status().oldFiles, false);
 });
+
+test('Piper: zu neue Stimmen (Mehrzeichen-Laute) werden übersprungen', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { SpeechManager } = require('../lib/speech');
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-pv-'));
+  const vd = path.join(ud, 'voices'); fs.mkdirSync(vd, { recursive: true });
+  const put = (id, map) => { fs.writeFileSync(path.join(vd, id + '.onnx'), 'x'); fs.writeFileSync(path.join(vd, id + '.onnx.json'), JSON.stringify({ phoneme_id_map: map })); };
+  put('de_DE-kerstin-medium', { a: [1], 'aɪ': [161] });
+  put('de_DE-pavoque-low', { a: [1], b: [2] });
+  const s = new SpeechManager(ud, () => {}, ud);
+  assert.strictEqual(s.installedVoice('de').id, 'de_DE-pavoque-low');
+  put('de_DE-kerstin-low', { a: [1], b: [2] });
+  assert.strictEqual(s.installedVoice('de').id, 'de_DE-kerstin-low');
+});

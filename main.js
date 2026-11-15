@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { Store } = require('./lib/store');
 const ollama = require('./lib/ollama');
-const { SpeechManager } = require('./lib/speech');
+const { SpeechManager, VOICES } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
 const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
@@ -70,6 +70,17 @@ if (!gotLock) {
     voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'oute_server.py'), (p) => send('voice:progress', p));
     registerIpc();
     createWindow();
+    // Bevorzugte Piper-Stimme (Kerstin, dfki) still nachladen, falls sie fehlt oder nicht lesbar war
+    setTimeout(async () => {
+      try {
+        if (!speech.piperBin()) return;
+        for (const k of ['de', 'tr']) {
+          const iv = speech.installedVoice(k);
+          const want = VOICES[k].names[0];
+          if (!iv || !iv.id.split('-').includes(want)) await speech.prepareTts(k);
+        }
+      } catch { /* egal, dann bleibt die vorhandene Stimme */ }
+    }, 5000);
     let st = store.getSettings();
     // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Piper
     if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
