@@ -71,7 +71,7 @@ def _kill_strays():
 
 def _start_llama(ngl):
     _kill_strays()
-    cmd = [args.llama, '-m', args.gguf, '-c', '4096', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    cmd = [args.llama, '-m', args.gguf, '-c', '8192', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     try:
         os.makedirs(args.cache, exist_ok=True)

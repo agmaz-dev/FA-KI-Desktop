@@ -71,3 +71,7 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.8.6
 - OuteTTS: llama-server mit einem einzigen Platz (-np 1) und Aufräumen übrig gebliebener llama-server-Prozesse; deutlich weniger Arbeitsspeicher.
+
+## Neu in 1.8.7
+- Der Stimmen-Server wird bei jedem App-Start auf den neuesten Stand gebracht (bisher nur bei der Einrichtung, dadurch kamen Verbesserungen nie an).
+- Kontext wieder 8192 (die Stimmprobe allein braucht ca. 3400 Tokens), dazu ein einziger Platz (-np 1).

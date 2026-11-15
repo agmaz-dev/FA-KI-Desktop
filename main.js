@@ -79,6 +79,7 @@ if (!gotLock) {
     if (st.autoStartOllama && /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(st.ollamaUrl)) {
       procs.ensureOllama(st.ollamaUrl).then((r) => send('app:ollamaStart', r)).catch(() => {});
     }
+    voiceInst.syncServer();
     if (st.ttsServerAuto && st.ttsEngine === 'server') {
       procs.ensureTtsServer(st).then(async (r) => {
         send('app:ttsStart', r);
