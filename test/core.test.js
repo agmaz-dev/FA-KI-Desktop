@@ -241,3 +241,14 @@ test('Supertonic: Ablauf mit nachgebautem onnxruntime', async () => {
   assert.ok(wav.length > 44);
   assert.ok(calls.includes('vocoder') && calls.filter((c) => c === 'vector_estimator').length >= 2);
 });
+
+test('Whisper-Ausgabe: Umlaut über Blockgrenze bleibt heil', async () => {
+  const { decodeChunks, run } = require('../lib/speech');
+  const buf = Buffer.from('Grüße aus München', 'utf8');
+  const i = buf.indexOf(0xc3);
+  assert.strictEqual(decodeChunks([buf.subarray(0, i + 1), buf.subarray(i + 1)]), 'Grüße aus München');
+  // Echter Kindprozess, der das „ü“ in zwei getrennten Schreibvorgängen ausgibt
+  const script = "const b=Buffer.from('Grüße','utf8');process.stdout.write(b.subarray(0,3));setTimeout(()=>process.stdout.write(b.subarray(3)),60);";
+  const { out } = await run(process.execPath, ['-e', script], { timeoutMs: 10000 });
+  assert.strictEqual(out, 'Grüße');
+});
