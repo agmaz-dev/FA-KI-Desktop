@@ -162,3 +162,15 @@ test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
   assert.ok(VOICES.de.names.indexOf('kerstin') < VOICES.de.names.indexOf('thorsten'));
   assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
+
+test('OuteTTS-Einrichtung: eigener Python-Ordner und Startbefehl', () => {
+  const { VoiceInstaller, paths } = require('../lib/voiceinstall');
+  const p = paths('/tmp/ud', 'oute');
+  assert.match(p.py, /python-oute/);
+  assert.match(p.serverPy, /oute_server\.py$/);
+  const v = new VoiceInstaller('/tmp/ud', '/tmp/x.py', () => {});
+  const c = v.command('oute');
+  assert.match(c, /--llama/);
+  assert.match(c, /OuteTTS-1\.0-0\.6B-Q8_0\.gguf/);
+  assert.doesNotMatch(v.command('cpu'), /--llama/);
+});

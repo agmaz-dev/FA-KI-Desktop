@@ -175,7 +175,7 @@ function shortFirst(sentences) {
   return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
 }
 
-export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', onState, onWarn } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', serverLangs = 'all', onState, onWarn } = {}) {
   stopSpeaking();
   const token = session;
   await cancelP;
@@ -183,7 +183,8 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const serverMode = engine === 'server' && voicePref !== 'windows';
+  const trViaPiper = serverLangs === 'de' && lang === 'tr';
+  const serverMode = engine === 'server' && voicePref !== 'windows' && !trViaPiper;
   const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
   let warned = false;
   const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });

@@ -240,34 +240,38 @@ export async function openSettings(ctx, startTab = 'general') {
     bSample.onclick = async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sInfo.textContent = 'Stimmprobe: ' + r.name; } };
     const bSetup = el('button', 'btn small primary', vstat.installed ? 'Neu einrichten / reparieren' : 'Stimme jetzt einrichten');
     const bGpu = el('button', 'btn small', vstat.gpuInstalled ? 'Grafikkarten-Version erneut einrichten' : 'Mit Grafikkarte beschleunigen (Versuch)');
+    const bOute = el('button', 'btn small', vstat.outeInstalled ? 'Schnelle Stimme (OuteTTS) erneut einrichten' : 'Schnelle Stimme testen (OuteTTS, nur Deutsch)');
     const bCancel = el('button', 'btn small', 'Abbrechen');
     const pt = el('div', 'note', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Eigene Stimme ist installiert.' : '')));
     pt.id = 'voiceProgText';
     const bar = el('div', 'bar'); const fill = el('div'); fill.id = 'voiceProgFill'; fill.style.cssText = 'height:100%;background:var(--accent);width:' + (VU.pct == null ? 5 : VU.pct) + '%'; bar.appendChild(fill);
     bar.style.display = VU.running ? '' : 'none';
     bCancel.style.display = VU.running ? '' : 'none';
-    bSetup.disabled = VU.running; bGpu.disabled = VU.running;
+    bSetup.disabled = VU.running; bGpu.disabled = VU.running; bOute.disabled = VU.running;
     bCancel.onclick = () => api.voice.cancel();
-    const runSetup = async (gpu) => {
+    const runSetup = async (kind) => {
+      const gpu = kind === 'gpu';
       VU.running = true; VU.done = ''; VU.text = 'Starte …'; VU.pct = 0;
       await api.settings.set({ ttsSampleFile: draft.ttsSampleFile });
       render();
-      const r = await api.voice.setup({ gpu });
+      const r = await api.voice.setup({ mode: kind });
       VU.running = false;
       const f = (x) => Number(x).toFixed(1).replace('.', ',');
       if (r.settings) {
         const fresh = r.settings;
-        Object.assign(draft, { ttsEngine: fresh.ttsEngine, ttsServerUrl: fresh.ttsServerUrl, ttsServerDir: fresh.ttsServerDir, ttsServerCmd: fresh.ttsServerCmd, ttsServerAuto: fresh.ttsServerAuto, ttsServerModel: fresh.ttsServerModel, ttsServerVoice: fresh.ttsServerVoice, ttsServerVoiceTr: fresh.ttsServerVoiceTr });
+        Object.assign(draft, { ttsEngine: fresh.ttsEngine, ttsServerUrl: fresh.ttsServerUrl, ttsServerDir: fresh.ttsServerDir, ttsServerCmd: fresh.ttsServerCmd, ttsServerAuto: fresh.ttsServerAuto, ttsServerModel: fresh.ttsServerModel, ttsServerVoice: fresh.ttsServerVoice, ttsServerVoiceTr: fresh.ttsServerVoiceTr, ttsServerLangs: fresh.ttsServerLangs });
       }
       if (r.ok) VU.done = `Fertig (${r.device}). Erster Testsatz: ${f(r.cold)} s, zweiter: ${f(r.seconds)} s. Klick unten auf „Speichern“.`;
-      else VU.done = 'Fehler: ' + r.error + (gpu ? ' Die bisherige Stimme bleibt aktiv.' : '');
+      else VU.done = 'Fehler: ' + r.error + (kind !== 'cpu' ? ' Die bisherige Stimme bleibt aktiv.' : '');
       render();
     };
-    bSetup.onclick = () => runSetup(false);
-    bGpu.onclick = () => runSetup(true);
-    const vrow = el('div', 'chips-row'); vrow.append(bSample, bSetup, bGpu, bCancel);
+    bSetup.onclick = () => runSetup('cpu');
+    bGpu.onclick = () => runSetup('gpu');
+    bOute.onclick = () => runSetup('oute');
+    const vrow = el('div', 'chips-row'); vrow.append(bSample, bSetup, bGpu, bOute, bCancel);
     const gnote = el('div', 'note', 'Grafikkarte (AMD Radeon): braucht Windows 11 und den AMD-Treiber 26.2.2 oder neuer, noch einmal mehrere GB Download. Läuft sie dort nicht oder ist der Grafikspeicher durch Ollama belegt, nimmt die Stimme automatisch den Prozessor.');
-    vc.append(sInfo, vrow, gnote, bar, pt);
+    const onote = el('div', 'note', 'OuteTTS (Test): schnelleres Sprachmodell mit Deiner Stimme, nur Deutsch. Türkisch spricht dann Piper. Einmalig mehrere GB Download (Pakete, llama-server, Modell ca. 650 MB). Die bisherige Stimme bleibt aktiv, falls etwas nicht klappt.');
+    vc.append(sInfo, vrow, gnote, onote, bar, pt);
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
     body.appendChild(vc);
     body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (lokal, einfach, solide)'], ['server', 'Eigener Stimmen-Server (beste Qualität)']], draft.ttsEngine), 'ttsEngine'), 'Ein Stimmen-Server (z. B. Chatterbox) klingt viel natürlicher, muss aber separat auf diesem PC laufen. Nutzt eine OpenAI-kompatible Adresse.'));

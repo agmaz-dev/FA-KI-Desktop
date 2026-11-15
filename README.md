@@ -29,3 +29,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Beim Einrichten der Stimme wird ein noch laufender alter Stimmen-Server auf dem Port beendet (vorher blieb er stehen und die Grafikkarten-Version wurde nicht benutzt).
 - Piper-Notfallstimmen: Deutsch bevorzugt pavoque, dann kerstin (Thorsten nur noch zuletzt); Türkisch bevorzugt dfki.
 - Der erste Satzteil beim Vorlesen mit dem Stimmen-Server ist kürzer (ca. 6–8 Wörter), damit das erste Wort früher kommt.
+
+## Neu in 1.7.0
+- **OuteTTS (Test):** Einstellungen → Sprache → „Schnelle Stimme testen (OuteTTS, nur Deutsch)“. Eigenes Python 3.11, llama-server (Vulkan, läuft auf AMD-Grafikkarten) und das Modell OuteTTS-1.0-0.6B (Q8). Klont Deine Stimme aus der gewählten Aufnahme (einmalig mit Whisper). Türkisch ist nicht trainiert und wird automatisch von Piper gesprochen. Schlägt etwas fehl, bleibt die bisherige Stimme aktiv.

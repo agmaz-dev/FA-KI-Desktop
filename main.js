@@ -204,7 +204,7 @@ function registerIpc() {
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
   ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => {
     const s = store.getSettings();
-    if (s.ttsEngine === 'server') return speech.synthesizeServer(text, voice, s, speed);
+    if (s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return speech.synthesize(text, voice, speed);
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
@@ -241,20 +241,21 @@ function registerIpc() {
   ipcMain.handle('voice:status', () => voiceInst.status());
   ipcMain.handle('voice:cancel', () => { voiceInst.cancel(); return true; });
   ipcMain.handle('voice:setup', async (_e, opts) => {
-    const mode = opts && opts.gpu ? 'gpu' : 'cpu';
+    const mode = opts && opts.mode ? String(opts.mode) : (opts && opts.gpu ? 'gpu' : 'cpu');
     const before = store.getSettings();
     try {
       const r = await voiceInst.install(mode);
       const sample = before.ttsSampleFile || '';
-      const apply = (cmd) => store.setSettings({
+      const apply = (cmd, langs) => store.setSettings({
         ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: cmd,
-        ttsServerAuto: true, ttsServerModel: 'chatterbox', ttsServerVoice: '', ttsServerVoiceTr: '',
+        ttsServerAuto: true, ttsServerModel: 'chatterbox', ttsServerVoice: '', ttsServerVoiceTr: '', ttsServerLangs: langs,
       });
       const oldCmd = before.ttsServerCmd;
+      const oldLangs = before.ttsServerLangs || 'all';
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
       await procs.freePort(voiceInst.url());
-      apply(r.cmd);
+      apply(r.cmd, mode === 'oute' ? 'de' : 'all');
       let st = await procs.ensureTtsServer(store.getSettings());
       try {
         if (!st.ok) throw new Error(st.error);
@@ -268,7 +269,7 @@ function registerIpc() {
       } catch (e) {
         // Neue Einrichtung läuft nicht: alten Stand wiederherstellen
         await procs.stop('tts');
-        if (oldCmd) { apply(oldCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
+        if (oldCmd) { apply(oldCmd, oldLangs); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
         throw e;
       }
     } catch (e) {
