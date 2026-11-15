@@ -53,6 +53,7 @@ export async function openSettings(ctx, startTab = 'general') {
   const [info] = await Promise.all([api.app.info()]);
 
   let vstat = { installed: false, busy: false };
+  const ST = (window.__stUi = window.__stUi || { running: false, done: '' });
   const VU = (window.__voiceUi = window.__voiceUi || { text: '', pct: null, running: false, done: '' });
   if (!window.__voiceSub) {
     window.__voiceSub = api.voice.onProgress((p) => {
@@ -232,6 +233,36 @@ export async function openSettings(ctx, startTab = 'general') {
     sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `Tempo: ${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
     const spr = formRow('Sprechtempo', sp); spr.appendChild(spl);
     body.appendChild(spr);
+    const stc = el('div', 'voice-card');
+    stc.appendChild(el('h3', null, 'Supertonic – schnelle, natürliche Stimmen (Deutsch und Türkisch)'));
+    stc.appendChild(el('div', 'note', 'Läuft direkt in der App, ganz ohne Zusatzprogramme, spricht flüssig und braucht wenig Speicher. Einmaliger Download von ca. 250 MB.'));
+    const stState = st.supertonic || { ready: false, voices: {} };
+    const stVoice = selectOf([['elena', 'Elena (weiblich)'], ['tessa', 'Tessa (weiblich)'], ['caleb', 'Caleb (männlich)']], draft.ttsStVoice || 'elena');
+    stVoice.addEventListener('change', async () => { draft.ttsStVoice = stVoice.value; await api.settings.set({ ttsStVoice: stVoice.value }); });
+    stc.appendChild(formRow('Stimme', stVoice));
+    const stNote = el('div', 'note', ST.done || (stState.ready ? 'Supertonic ist eingerichtet.' : 'Noch nicht eingerichtet.'));
+    const stBtn = el('button', 'btn small primary', stState.ready ? 'Neu laden / reparieren' : 'Supertonic einrichten');
+    const stCancel = el('button', 'btn small', 'Abbrechen');
+    stCancel.style.display = ST.running ? '' : 'none';
+    stBtn.disabled = ST.running;
+    stCancel.onclick = () => api.supertonic.cancel();
+    stBtn.onclick = async () => {
+      ST.running = true; ST.done = 'Wird geladen …';
+      render();
+      await api.settings.set({ ttsStVoice: draft.ttsStVoice || 'elena' });
+      const r = await api.supertonic.setup();
+      ST.running = false;
+      ctx.hideProgress();
+      if (r.ok) {
+        Object.assign(draft, r.settings);
+        ST.done = `Fertig. Erster Testsatz: ${Number(r.seconds).toFixed(1).replace('.', ',')} s. Supertonic ist jetzt aktiv, Tempo auf 1× gestellt. Klick unten auf „Speichern“.`;
+      } else ST.done = 'Fehler: ' + r.error + ' Es spricht weiter Piper.';
+      render();
+    };
+    const stRow = el('div', 'chips-row'); stRow.append(stBtn, stCancel);
+    stc.append(stRow, stNote);
+    stc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
+    body.appendChild(stc);
     const vc = el('div', 'voice-card');
     vc.appendChild(el('h3', null, 'Meine Stimme (OuteTTS, Deutsch)'));
     vc.appendChild(el('div', 'note', 'Klingt nach Deiner Aufnahme und läuft ganz auf diesem PC. Die Einrichtung ist einmalig (mehrere GB Download). Türkisch spricht Piper.'));
@@ -270,7 +301,7 @@ export async function openSettings(ctx, startTab = 'general') {
     }
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
     body.appendChild(vc);
-    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (schnell: deutsche Frauenstimme, türkische Stimme)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Piper automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
+    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (schnell: deutsche Frauenstimme, türkische Stimme)'], ['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Piper automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   ocr: { run: inv('ocr:run') },
   voice: { status: inv('voice:status'), setup: inv('voice:setup'), cancel: inv('voice:cancel'), cleanOld: inv('voice:cleanOld'), onProgress: on('voice:progress') },
+  supertonic: { setup: inv('supertonic:setup'), cancel: inv('supertonic:cancel') },
   speech: {
     status: inv('speech:status'), prepareStt: inv('speech:prepareStt'), prepareTts: inv('speech:prepareTts'),
     abort: inv('speech:abort'), transcribe: inv('speech:transcribe'), synthesize: inv('speech:synthesize'), serverVoices: inv('speech:serverVoices'),

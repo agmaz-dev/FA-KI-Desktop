@@ -80,5 +80,9 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - OuteTTS nimmt automatisch die kleinere Datei OuteTTS-1.0-0.6B-Q4_0.gguf (oder Q5_0), wenn sie im Ordner voice neben der Q8-Datei liegt.
 - Speicherleck im Stimmen-Server behoben (inference_mode, Aufräumen nach jedem Satz).
 
+## Neu in 1.8.10
+- Neue schnelle Stimmen: **Supertonic** mit Elena, Tessa und Caleb (Deutsch und Türkisch). Läuft ohne Grafikkarte und ohne Python direkt in der App, einmaliger Download von ca. 250 MB (Einstellungen → Sprache → „Supertonic einrichten“).
+- Text einfügen im Eingabefeld funktioniert wieder, auch aus Word und Webseiten (dort liegt neben dem Text oft ein Bild in der Zwischenablage). Dazu gibt es ein Rechtsklick-Menü (Ausschneiden, Kopieren, Einfügen) und die Tastenkürzel.
+
 ## Neu in 1.8.9
 - Piper: Stimmen, die das mitgelieferte Sprachprogramm nicht lesen kann (Kerstin „medium“), werden übersprungen und durch die passende Version (Kerstin „low“) ersetzt. Die bevorzugte Stimme (Kerstin, dfki) wird beim Start still nachgeladen, falls sie fehlt.

@@ -9,6 +9,7 @@ const { downloadFile } = require('./lib/downloader');
 const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
 const { VoiceInstaller } = require('./lib/voiceinstall');
+const { Supertonic } = require('./lib/supertonic');
 
 let win = null;
 let store = null;
@@ -17,6 +18,7 @@ const chatControllers = new Map();
 let pullController = null;
 let ocrWorker = null;
 let voiceInst = null;
+let supertonic = null;
 const procs = new Procs();
 
 const send = (ch, payload) => {
@@ -39,7 +41,20 @@ function createWindow() {
       sandbox: true,
     },
   });
-  Menu.setApplicationMenu(null);
+  // Menüleiste bleibt versteckt, aber Bearbeiten-Tastenkürzel (Einfügen, Kopieren …) funktionieren.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'Bearbeiten', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+  ]));
+  win.setMenuBarVisibility(false);
+  win.webContents.on('context-menu', (_e, params) => {
+    const items = [];
+    if (params.isEditable) {
+      items.push({ label: 'Ausschneiden', role: 'cut', enabled: params.editFlags.canCut }, { label: 'Kopieren', role: 'copy', enabled: params.editFlags.canCopy }, { label: 'Einfügen', role: 'paste', enabled: params.editFlags.canPaste }, { type: 'separator' }, { label: 'Alles auswählen', role: 'selectAll' });
+    } else if (params.selectionText) {
+      items.push({ label: 'Kopieren', role: 'copy' }, { label: 'Alles auswählen', role: 'selectAll' });
+    }
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+  });
   win.loadFile(path.join(__dirname, 'build', 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -60,6 +75,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     const dataDir = app.getPath('userData');
     store = new Store(dataDir);
+    supertonic = new Supertonic(dataDir, (p) => send('speech:progress', p));
     speech = new SpeechManager(dataDir, (p) => send('speech:progress', p), app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled'));
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
@@ -222,15 +238,29 @@ function registerIpc() {
   });
 
   // ---------- Sprache ----------
-  ipcMain.handle('speech:status', () => speech.status());
+  ipcMain.handle('speech:status', () => ({ ...speech.status(), supertonic: supertonic.status() }));
   ipcMain.handle('speech:prepareStt', (_e, model) => speech.prepareStt(model));
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
   ipcMain.handle('speech:synthesize', (_e, { text, voice, speed, piper }) => {
     const s = store.getSettings();
+    if (!piper && s.ttsEngine === 'supertonic') return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
     if (!piper && s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return speech.synthesize(text, voice, speed);
+  });
+  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); return true; });
+  ipcMain.handle('supertonic:setup', async () => {
+    try {
+      await supertonic.prepare();
+      const t0 = Date.now();
+      await supertonic.synthesize('Hallo, das ist ein kurzer Test.', 'de', store.getSettings().ttsStVoice || 'elena', 1);
+      const seconds = (Date.now() - t0) / 1000;
+      const settings = store.setSettings({ ttsEngine: 'supertonic', ttsSpeed: 1, ttsStVoice: store.getSettings().ttsStVoice || 'elena' });
+      return { ok: true, seconds, settings: { ttsEngine: 'supertonic', ttsSpeed: 1, ttsStVoice: (settings && settings.ttsStVoice) || 'elena' } };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
   ipcMain.handle('speech:cancelSynth', () => speech.cancelServer(store.getSettings().ttsServerUrl));

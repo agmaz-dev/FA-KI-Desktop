@@ -1,7 +1,7 @@
 {
   "name": "fa-ki-desktop",
   "productName": "FA KI Desktop",
-  "version": "1.8.9",
+  "version": "1.8.10",
   "description": "Deutsche Desktop-App für lokale KI mit Ollama: Chat, PDF-Lesen, Spracheingabe und Vorlesen",
   "main": "main.js",
   "author": "Feridun Agmaz",
@@ -16,6 +16,7 @@
   "dependencies": {
     "adm-zip": "^0.5.16",
     "marked": "^14.1.0",
+    "onnxruntime-node": "1.22.0",
     "tesseract.js": "5.1.1"
   },
   "devDependencies": {
@@ -39,7 +40,10 @@
       "lib/**/*",
       "voice-server/**/*",
       "build/renderer/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
     ],
     "asar": false,
     "win": {

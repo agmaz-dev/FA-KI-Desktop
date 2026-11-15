@@ -184,7 +184,7 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
   const trViaPiper = serverLangs === 'de' && lang === 'tr';
-  const serverMode = engine === 'server' && voicePref !== 'windows' && !trViaPiper;
+  const serverMode = ((engine === 'server' && !trViaPiper) || engine === 'supertonic') && voicePref !== 'windows';
   const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
   let warned = false;
   const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });

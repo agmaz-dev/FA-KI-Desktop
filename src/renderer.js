@@ -481,8 +481,8 @@ async function speakNow(text, settingsOverride) {
       speechStatus: state.speechStatus,
       speed: s.ttsSpeed || 1,
       engine: s.ttsEngine || 'piper',
-      serverLangs: s.ttsServerLangs || 'all',
-      onWarn: (m) => hint('Meine Stimme (OuteTTS) ist gerade nicht bereit, es spricht Piper bzw. die Windows-Stimme: ' + m, 0),
+      serverLangs: s.ttsEngine === 'supertonic' ? 'all' : (s.ttsServerLangs || 'all'),
+      onWarn: (m) => hint((s.ttsEngine === 'supertonic' ? 'Supertonic ist gerade nicht bereit' : 'Meine Stimme (OuteTTS) ist gerade nicht bereit') + ', es spricht Piper bzw. die Windows-Stimme: ' + m, 0),
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
@@ -777,7 +777,10 @@ function wire() {
     for (const f of e.dataTransfer.files) await addFile(f.name, new Uint8Array(await f.arrayBuffer()));
   });
   $('input').addEventListener('paste', async (e) => {
-    for (const it of e.clipboardData.items) {
+    const items = Array.from(e.clipboardData.items);
+    // Enthält die Zwischenablage auch Text (z. B. aus Word oder Webseiten), wird ganz normal Text eingefügt.
+    if (items.some((x) => x.type === 'text/plain' || x.type === 'text/html')) return;
+    for (const it of items) {
       if (it.type.startsWith('image/')) {
         const f = it.getAsFile();
         if (f) { e.preventDefault(); await addFile('Bild-' + Date.now() + '.png', new Uint8Array(await f.arrayBuffer())); }

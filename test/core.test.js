@@ -186,3 +186,58 @@ test('Piper: zu neue Stimmen (Mehrzeichen-Laute) werden übersprungen', () => {
   put('de_DE-kerstin-low', { a: [1], b: [2] });
   assert.strictEqual(s.installedVoice('de').id, 'de_DE-kerstin-low');
 });
+
+test('Supertonic: Text, Teilstücke, WAV', () => {
+  const st = require('../lib/supertonic');
+  assert.strictEqual(st.preprocessText('Hallo  Welt', 'de'), '<de>Hallo Welt.</de>');
+  assert.strictEqual(st.preprocessText('Merhaba!', 'tr'), '<tr>Merhaba!</tr>');
+  assert.throws(() => st.preprocessText('x', 'xx'));
+  const ch = st.chunkText('Eins ist da. ' + 'Zwei ist auch da. '.repeat(30), 100);
+  assert.ok(ch.length > 3 && ch.every((c) => c.length <= 120));
+  const w = st.wavBuffer(Float32Array.from([0, 0.5, -0.5]), 44100);
+  assert.strictEqual(w.toString('ascii', 0, 4), 'RIFF');
+  assert.strictEqual(w.readUInt32LE(24), 44100);
+  assert.strictEqual(w.length, 44 + 6);
+  assert.deepStrictEqual(Object.keys(st.VOICES), ['elena', 'tessa', 'caleb']);
+});
+
+test('Supertonic: Ablauf mit nachgebautem onnxruntime', async () => {
+  const { Supertonic, MODEL_FILES, VOICES } = require('../lib/supertonic');
+  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-st-'));
+  const calls = [];
+  class Tensor { constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; } }
+  const ort = {
+    Tensor,
+    InferenceSession: {
+      create: async (file) => ({
+        run: async (f) => {
+          const n = path.basename(file, '.onnx');
+          calls.push(n);
+          if (n === 'duration_predictor') { assert.strictEqual(f.text_ids.type, 'int64'); return { duration: { data: [1.0] } }; }
+          if (n === 'text_encoder') return { text_emb: new Tensor('float32', new Float32Array(4), [1, 2, 2]) };
+          if (n === 'vector_estimator') {
+            assert.ok(f.noisy_latent && f.latent_mask && f.total_step && f.current_step && f.text_emb);
+            return { denoised_latent: { data: f.noisy_latent.data } };
+          }
+          return { wav_tts: { data: new Float32Array(f.latent.dims[2] * 512 * 2).fill(0.1) } };
+        },
+      }),
+    },
+  };
+  const s = new Supertonic(ud, () => {}, ort);
+  assert.strictEqual(s.status().ready, false);
+  for (const f of MODEL_FILES) {
+    fs.mkdirSync(path.dirname(s.file(f)), { recursive: true });
+    fs.writeFileSync(s.file(f), f === 'onnx/tts.json' ? JSON.stringify({ ae: { sample_rate: 1000, base_chunk_size: 10 }, ttl: { chunk_compress_factor: 2, latent_dim: 3 } }) : f === 'onnx/unicode_indexer.json' ? JSON.stringify(Array.from({ length: 400 }, (_, i) => i)) : 'x');
+  }
+  fs.mkdirSync(path.join(s.dir, 'voice_styles'), { recursive: true });
+  fs.writeFileSync(path.join(s.dir, 'voice_styles', VOICES.elena.id + '.json'), JSON.stringify({ style_ttl: { data: [[[1, 2], [3, 4]]], dims: [1, 2, 2] }, style_dp: { data: [[[1, 2]]], dims: [1, 1, 2] } }));
+  assert.strictEqual(s.status().ready, true);
+  assert.strictEqual(s.hasVoice('tessa'), false);
+  await assert.rejects(s.synthesize('Hallo', 'de', 'tessa', 1, 2), /noch nicht geladen/);
+  const wav = await s.synthesize('Guten Tag. Wie geht es Dir?', 'de', 'elena', 1, 2);
+  assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
+  assert.strictEqual(wav.readUInt32LE(24), 1000);
+  assert.ok(wav.length > 44);
+  assert.ok(calls.includes('vocoder') && calls.filter((c) => c === 'vector_estimator').length >= 2);
+});
