@@ -150,7 +150,7 @@ test('Word-Export erzeugt gültiges DOCX-Paket', () => {
 test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
   const { VOICES } = require('../lib/speech');
   assert.strictEqual(VOICES.de.names[0], 'kerstin');
-  assert.ok(VOICES.de.names.indexOf('pavoque') < VOICES.de.names.indexOf('thorsten'));
+  assert.deepStrictEqual(VOICES.de.names, ['kerstin']);
   assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
 

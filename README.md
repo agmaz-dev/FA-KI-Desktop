@@ -55,3 +55,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - OuteTTS: liefert die Grafikkarte kein Audio, startet der Stimmen-Server automatisch auf dem Prozessor neu und versucht es erneut.
 - Protokoll des llama-servers (voice/hf-cache/llama-server.log); die Fehlermeldung zeigt dessen Ende.
 - Größerer Kontext (8192) für das Sprachmodell.
+
+## Neu in 1.8.2
+- Deutsch spricht nur noch Piper „kerstin“ (Frauenstimme); alle Männerstimmen sind aus der Auswahl entfernt.
