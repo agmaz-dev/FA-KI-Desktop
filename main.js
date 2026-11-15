@@ -79,7 +79,15 @@ if (!gotLock) {
     if (st.autoStartOllama && /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(st.ollamaUrl)) {
       procs.ensureOllama(st.ollamaUrl).then((r) => send('app:ollamaStart', r)).catch(() => {});
     }
-    if (st.ttsServerAuto && st.ttsEngine === 'server') procs.ensureTtsServer(st).then((r) => send('app:ttsStart', r)).catch(() => {});
+    if (st.ttsServerAuto && st.ttsEngine === 'server') {
+      procs.ensureTtsServer(st).then(async (r) => {
+        send('app:ttsStart', r);
+        // Vorwärmen: Modell und Stimmprofil laden, damit der erste echte Satz sofort kommt
+        if (r && r.ok) {
+          try { await voiceInst.waitReady(); await speech.synthesizeServer('Hallo.', 'de', store.getSettings(), 1); } catch { /* egal */ }
+        }
+      }).catch(() => {});
+    }
   });
   app.on('window-all-closed', () => app.quit());
 }
