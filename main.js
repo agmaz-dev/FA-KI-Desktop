@@ -203,6 +203,9 @@ function registerIpc() {
         });
       }, pullController.signal);
       return true;
+    } catch (e) {
+      if (pullController && pullController.signal.aborted) return { aborted: true };
+      throw e;
     } finally {
       pullController = null;
     }
