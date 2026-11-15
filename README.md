@@ -19,3 +19,8 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.4.0
 - **Eigene Stimme mit einem Klick:** Einstellungen → Sprache → „Stimme jetzt einrichten“. Die App lädt ein portables Python, installiert Chatterbox (Multilingual, Deutsch und Türkisch), startet den Stimmen-Server im Hintergrund und erzeugt einen Testsatz. Eine eigene Stimmprobe (WAV) kann vorher gewählt werden. Der Server liegt in `voice-server/voice_server.py`.
+
+## Neu in 1.5.0
+- **Grafikkarte (Versuch):** Einstellungen → Sprache → „Mit Grafikkarte beschleunigen“ richtet ein zweites Python 3.12 mit AMD-ROCm-PyTorch ein (Windows 11, AMD-Treiber 26.2.2 oder neuer). Läuft es nicht oder ist der Grafikspeicher knapp, nutzt der Stimmen-Server automatisch den Prozessor. Die bisherige Stimme bleibt bei Fehlern aktiv.
+- `setuptools<81` wird mitinstalliert (Wasserzeichen-Modul von Chatterbox braucht `pkg_resources`).
+- Vorlesen: mehrere Sätze werden vorab erzeugt, der erste Satz wird kürzer geschnitten, „Stopp“ bricht auch den Stimmen-Server ab, Zeitlimit auf 5 Minuten, ein Wiederholungsversuch pro Satz.

@@ -28,25 +28,47 @@ if args.cache:
 os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-STATE = {'state': 'loading', 'detail': 'Modell wird geladen (beim ersten Mal wird es heruntergeladen) …'}
+STATE = {'state': 'loading', 'detail': 'Modell wird geladen (beim ersten Mal wird es heruntergeladen) …', 'device': ''}
 MODEL = {'m': None}
 LOCK = threading.Lock()
+GEN = {'n': 0}  # wird bei /cancel hochgezählt; laufende Aufträge brechen dann ab
 LANGS = {'de', 'tr', 'en', 'fr', 'es', 'it', 'nl', 'pl', 'pt', 'ru', 'ar', 'zh', 'ja', 'ko', 'hi', 'sv', 'da', 'fi', 'el', 'he', 'ms', 'no', 'sw'}
 
 
-def load_model():
+def _load_on(dev):
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    return ChatterboxMultilingualTTS.from_pretrained(device=dev)
+
+
+def load_model(force_cpu=False):
+    STATE.update(state='loading', detail='Modell wird geladen (beim ersten Mal wird es heruntergeladen) …')
     try:
         import torch
-        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        dev = args.device
-        if dev == 'auto':
-            dev = 'cuda' if torch.cuda.is_available() else 'cpu'
         try:
             torch.set_num_threads(max(2, (os.cpu_count() or 4) - 1))
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
-        MODEL['m'] = ChatterboxMultilingualTTS.from_pretrained(device=dev)
-        STATE.update(state='ready', detail='Bereit (' + dev + ')')
+        dev = args.device
+        if dev == 'auto':
+            dev = 'cuda' if (torch.cuda.is_available() and not force_cpu) else 'cpu'
+        if force_cpu:
+            dev = 'cpu'
+        note = ''
+        try:
+            MODEL['m'] = _load_on(dev)
+        except Exception as e:  # noqa: BLE001
+            if dev == 'cpu':
+                raise
+            note = f' (Grafikkarte nicht nutzbar: {type(e).__name__}; Prozessor)'
+            dev = 'cpu'
+            MODEL['m'] = _load_on(dev)
+        name = ''
+        if dev == 'cuda':
+            try:
+                name = ': ' + torch.cuda.get_device_name(0)
+            except Exception:  # noqa: BLE001
+                name = ''
+        STATE.update(state='ready', device=dev, detail=('Bereit (GPU' + name + ')') if dev == 'cuda' else 'Bereit (Prozessor)' + note)
     except Exception as e:  # noqa: BLE001
         STATE.update(state='error', detail=f'{type(e).__name__}: {e}')
 
@@ -84,20 +106,50 @@ def voice_path(name):
     return p if os.path.isfile(p) else None
 
 
-def synth(text, lang, voice):
+class Cancelled(Exception):
+    pass
+
+
+def synth(text, lang, voice, my_gen):
     import numpy as np
     import soundfile as sf
-    m = MODEL['m']
     lang = lang if lang in LANGS else 'de'
     pieces = []
-    sr = m.sr
+    sr = MODEL['m'].sr
     for c in chunks(text):
         kw = dict(language_id=lang, exaggeration=0.5, cfg_weight=0.5)
         vp = voice_path(voice)
         if vp:
             kw['audio_prompt_path'] = vp
-        with LOCK:
-            wav = m.generate(c, **kw)
+        wav = None
+        for attempt in (1, 2):
+            if GEN['n'] != my_gen:
+                raise Cancelled()
+            try:
+                with LOCK:
+                    if GEN['n'] != my_gen:
+                        raise Cancelled()
+                    wav = MODEL['m'].generate(c, **kw)
+                break
+            except Cancelled:
+                raise
+            except RuntimeError as e:
+                # Zu wenig Grafikspeicher (z. B. weil Ollama ihn belegt): auf den Prozessor wechseln
+                if attempt == 1 and 'out of memory' in str(e).lower() and STATE.get('device') == 'cuda':
+                    with LOCK:
+                        MODEL['m'] = None
+                        try:
+                            import gc
+                            import torch
+                            gc.collect()
+                            torch.cuda.empty_cache()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        load_model(force_cpu=True)
+                        if STATE['state'] != 'ready':
+                            raise
+                    continue
+                raise
         a = wav.squeeze().detach().cpu().numpy() if hasattr(wav, 'detach') else np.asarray(wav).squeeze()
         pieces.append(a.astype('float32'))
         pieces.append(np.zeros(int(sr * 0.12), dtype='float32'))
@@ -136,6 +188,9 @@ class H(BaseHTTPRequestHandler):
         return self._send(404, {'error': 'nicht gefunden'})
 
     def do_POST(self):  # noqa: N802
+        if self.path == '/cancel':
+            GEN['n'] += 1
+            return self._send(200, {'ok': True})
         if self.path != '/v1/audio/speech':
             return self._send(404, {'error': 'nicht gefunden'})
         try:
@@ -146,13 +201,16 @@ class H(BaseHTTPRequestHandler):
         text = str(req.get('input') or '').strip()
         if not text:
             return self._send(400, {'error': 'Kein Text'})
+        my_gen = GEN['n']
         t0 = time.time()
         while STATE['state'] == 'loading' and time.time() - t0 < 100:
             time.sleep(0.5)
         if STATE['state'] != 'ready':
             return self._send(503, {'error': STATE['detail']})
         try:
-            wav = synth(text, str(req.get('language') or 'de')[:2].lower(), req.get('voice'))
+            wav = synth(text, str(req.get('language') or 'de')[:2].lower(), req.get('voice'), my_gen)
+        except Cancelled:
+            return self._send(499, {'error': 'abgebrochen'})
         except Exception as e:  # noqa: BLE001
             return self._send(500, {'error': f'{type(e).__name__}: {e}'})
         return self._send(200, wav, 'audio/wav')

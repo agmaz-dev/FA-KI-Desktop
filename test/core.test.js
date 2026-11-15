@@ -146,3 +146,12 @@ test('Word-Export erzeugt gültiges DOCX-Paket', () => {
   assert.match(xml, /&lt;b&gt;/);
   assert.ok(!/<b>x/.test(xml));
 });
+
+test('Stimmen-Einrichtung: CPU- und GPU-Python liegen getrennt', () => {
+  const { VoiceInstaller, paths } = require('../lib/voiceinstall');
+  const v = new VoiceInstaller('/tmp/ud', '/tmp/x.py', () => {});
+  assert.notStrictEqual(paths('/tmp/ud', 'cpu').py, paths('/tmp/ud', 'gpu').py);
+  assert.match(v.command('gpu'), /python-gpu/);
+  assert.doesNotMatch(v.command('cpu'), /python-gpu/);
+  assert.match(v.command('cpu'), /--port 8004/);
+});

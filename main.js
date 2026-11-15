@@ -208,6 +208,7 @@ function registerIpc() {
     return speech.synthesize(text, voice, speed);
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
+  ipcMain.handle('speech:cancelSynth', () => speech.cancelServer(store.getSettings().ttsServerUrl));
   ipcMain.handle('speech:startServer', () => procs.ensureTtsServer(store.getSettings()));
   ipcMain.handle('speech:pickSample', async () => {
     const r = await dialog.showOpenDialog(win, {
@@ -239,23 +240,38 @@ function registerIpc() {
   });
   ipcMain.handle('voice:status', () => voiceInst.status());
   ipcMain.handle('voice:cancel', () => { voiceInst.cancel(); return true; });
-  ipcMain.handle('voice:setup', async () => {
+  ipcMain.handle('voice:setup', async (_e, opts) => {
+    const mode = opts && opts.gpu ? 'gpu' : 'cpu';
+    const before = store.getSettings();
     try {
-      const r = await voiceInst.install();
-      const sample = store.getSettings().ttsSampleFile || '';
-      store.setSettings({
-        ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: r.cmd,
+      const r = await voiceInst.install(mode);
+      const sample = before.ttsSampleFile || '';
+      const apply = (cmd) => store.setSettings({
+        ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: cmd,
         ttsServerAuto: true, ttsServerModel: 'chatterbox', ttsServerVoice: '', ttsServerVoiceTr: '',
       });
-      const st = await procs.ensureTtsServer(store.getSettings());
-      if (!st.ok) throw new Error(st.error);
-      await voiceInst.waitReady();
-      send('voice:progress', { text: 'Testsatz wird erzeugt …', pct: 95 });
-      const b = await voiceInst.benchmark(sample);
-      send('voice:progress', { text: 'Fertig.', pct: 100 });
-      return { ok: true, seconds: b.seconds };
+      const oldCmd = before.ttsServerCmd;
+      await speech.cancelServer(voiceInst.url());
+      await procs.stop('tts');
+      apply(r.cmd);
+      let st = await procs.ensureTtsServer(store.getSettings());
+      try {
+        if (!st.ok) throw new Error(st.error);
+        const ready = await voiceInst.waitReady();
+        send('voice:progress', { text: 'Testsatz wird erzeugt (1/2) …', pct: 92 });
+        const cold = await voiceInst.benchmark(sample);
+        send('voice:progress', { text: 'Testsatz wird erzeugt (2/2) …', pct: 96 });
+        const warm = await voiceInst.benchmark(sample);
+        send('voice:progress', { text: 'Fertig.', pct: 100 });
+        return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, mode, settings: store.getSettings() };
+      } catch (e) {
+        // Neue Einrichtung läuft nicht: alten Stand wiederherstellen
+        await procs.stop('tts');
+        if (oldCmd) { apply(oldCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
+        throw e;
+      }
     } catch (e) {
-      return { ok: false, error: String(e.message || e) };
+      return { ok: false, error: String(e.message || e), settings: store.getSettings() };
     }
   });
   ipcMain.handle('ollama:ensure', () => procs.ensureOllama(base()));

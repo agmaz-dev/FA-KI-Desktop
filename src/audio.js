@@ -98,8 +98,15 @@ function hardCancelSynth() {
   } catch { /* egal */ }
 }
 
+let cancelP = Promise.resolve();
+let serverJobs = false;
+
 export function stopSpeaking() {
   session++;
+  if (serverJobs && window.api.speech.cancelSynth) {
+    serverJobs = false;
+    cancelP = window.api.speech.cancelSynth().catch(() => {});
+  }
   if (playing && playing.audio) {
     try { playing.audio.pause(); playing.audio.removeAttribute('src'); playing.audio.load(); } catch { /* egal */ }
     if (playing.done) playing.done();
@@ -157,29 +164,63 @@ function playBytes(bytes, token) {
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
  * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
+/** Schneidet den ersten Satz an einem Komma kurz, damit die Stimme früher anfängt. */
+function shortFirst(sentences) {
+  const f = sentences[0] || '';
+  if (f.length <= 90) return sentences;
+  const m = f.slice(0, 110).match(/^(.{35,110}?[,;:])\s/);
+  if (!m) return sentences;
+  return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
+}
+
 export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', onState, onWarn } = {}) {
   stopSpeaking();
   const token = session;
+  await cancelP;
+  if (token !== session) return;
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
   const serverMode = engine === 'server' && voicePref !== 'windows';
   const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
   let warned = false;
-  const synth = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed }).catch((e) => {
-    if (!warned && onWarn) { warned = true; onWarn(String((e && e.message) || e)); }
+  const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });
+  const synth = async (t) => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (token !== session) return null;
+      try {
+        return await synthOnce(t);
+      } catch (e) {
+        const msg = String((e && e.message) || e);
+        if (attempt === 1 && !/499|abgebrochen/i.test(msg) && token === session) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+        if (!warned && onWarn && token === session) { warned = true; onWarn(msg); }
+        return null;
+      }
+    }
     return null;
-  });
-  const sentences = splitSentences(plain, piperOk ? 300 : 200);
+  };
+  let sentences = splitSentences(plain, piperOk ? (serverMode ? 200 : 300) : 200);
+  if (serverMode) sentences = shortFirst(sentences);
   stateCb = onState || null;
   onState && onState(true);
   try {
     if (piperOk) {
-      let next = synth(sentences[0]);
+      // Mehrere Sätze vorab erzeugen, während der aktuelle spricht (Server arbeitet sie nacheinander ab).
+      const depth = serverMode ? 3 : 2;
+      const jobs = [];
+      let started = 0;
+      const pump = (upTo) => {
+        while (started < sentences.length && started <= upTo) {
+          if (serverMode) serverJobs = true;
+          jobs[started] = synth(sentences[started]);
+          started++;
+        }
+      };
       for (let i = 0; i < sentences.length; i++) {
-        const cur = await next;
+        pump(i + depth - 1);
+        const cur = await jobs[i];
         if (token !== session) return;
-        next = i + 1 < sentences.length ? synth(sentences[i + 1]) : null;
+        pump(i + depth);
         if (cur) await playBytes(cur, token);
         else await speakWindows(sentences[i], lang, speed, token);
         if (token !== session) return;

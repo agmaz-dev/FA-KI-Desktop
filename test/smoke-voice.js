@@ -22,7 +22,7 @@ srv.listen(11434, '127.0.0.1', () => {
     await js("document.getElementById('btnSettings').click()"); await wait(400);
     await js("[...document.querySelectorAll('.set-nav button')].find(b=>/Sprache/.test(b.textContent)).click()"); await wait(500);
     const txt = await js("document.querySelector('.set-body').innerText");
-    const need = ['Eigene Stimme', 'Stimme jetzt einrichten', 'Meine Stimmprobe', 'Ordner des Stimmen-Servers', 'Startbefehl', 'Stimmen-Server mit der App starten', 'Server jetzt starten'];
+    const need = ['Eigene Stimme', 'Stimme jetzt einrichten', 'Mit Grafikkarte beschleunigen', 'Meine Stimmprobe', 'Ordner des Stimmen-Servers', 'Startbefehl', 'Stimmen-Server mit der App starten', 'Server jetzt starten'];
     const missing = need.filter((n) => !txt.toLowerCase().includes(n.toLowerCase()));
     await js("[...document.querySelectorAll('.set-nav button')].find(b=>/Allgemein/.test(b.textContent)).click()"); await wait(400);
     const gen = await js("document.querySelector('.set-body').innerText");
