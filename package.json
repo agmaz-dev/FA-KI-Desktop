@@ -39,6 +39,8 @@
       "preload.js",
       "lib/**/*",
       "voice-server/**/*",
+      "!voice-server/**/__pycache__/**",
+      "!**/*.pyc",
       "build/renderer/**/*",
       "package.json",
       "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
