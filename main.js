@@ -90,6 +90,10 @@ if (!gotLock) {
     setTimeout(async () => {
       try {
         if (!speech.piperBin()) return;
+        // Nur wenn Piper wirklich spricht (Motor Piper, oder OuteTTS mit Piper für Türkisch/Rückfall).
+        // Bei Supertonic wird nichts im Hintergrund geladen.
+        const eng = store.getSettings().ttsEngine;
+        if (eng !== 'piper' && eng !== 'server') return;
         for (const k of ['de', 'tr']) {
           const iv = speech.installedVoice(k);
           const want = VOICES[k].names[0];
