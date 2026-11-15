@@ -54,8 +54,24 @@ def _health(timeout=2):
         return False
 
 
+def _kill_strays():
+    """Übrig gebliebene llama-server aus unserem Ordner beenden (sonst doppelter Speicherbedarf)."""
+    if os.name != 'nt':
+        return
+    d = os.path.dirname(os.path.abspath(args.llama)).replace("'", "''")
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='llama-server.exe'\" | "
+          f"Where-Object {{ $_.ExecutablePath -like '{d}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}")
+    try:
+        subprocess.run(['powershell', '-NoProfile', '-Command', ps], timeout=20, creationflags=0x08000000,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:  # noqa: BLE001
+        pass
+    time.sleep(1)
+
+
 def _start_llama(ngl):
-    cmd = [args.llama, '-m', args.gguf, '-c', '4096', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    _kill_strays()
+    cmd = [args.llama, '-m', args.gguf, '-c', '4096', '-np', '1', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     try:
         os.makedirs(args.cache, exist_ok=True)

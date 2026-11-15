@@ -68,3 +68,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 ## Neu in 1.8.5
 - OuteTTS: kleinerer Speicherbedarf (Kontext 4096, kürzere Maximallänge) und Prompt-Cache, damit die Stimme neben dem großen Sprachmodell auf der Grafikkarte weniger stockt.
 - Zeitprotokoll je Satz: voice/hf-cache/tts-timing.log.
+
+## Neu in 1.8.6
+- OuteTTS: llama-server mit einem einzigen Platz (-np 1) und Aufräumen übrig gebliebener llama-server-Prozesse; deutlich weniger Arbeitsspeicher.
