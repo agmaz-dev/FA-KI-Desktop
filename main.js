@@ -2,7 +2,7 @@
 const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { Store } = require('./lib/store');
+const { Store, DEFAULT_SETTINGS } = require('./lib/store');
 const ollama = require('./lib/ollama');
 const { SpeechManager, VOICES } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
@@ -122,10 +122,22 @@ if (!gotLock) {
 
 const base = () => store.getSettings().ollamaUrl;
 
+// Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir']);
+/** Lässt aus der Oberfläche nur bekannte, unkritische Einstellungen durch. */
+function filterRendererSettings(patch) {
+  const out = {};
+  if (!patch || typeof patch !== 'object') return out;
+  for (const [k, v] of Object.entries(patch)) {
+    if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, k) && !MAIN_ONLY_SETTINGS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 function registerIpc() {
   // ---------- Einstellungen & Chats ----------
   ipcMain.handle('settings:get', () => store.getSettings());
-  ipcMain.handle('settings:set', (_e, patch) => store.setSettings(patch));
+  ipcMain.handle('settings:set', (_e, patch) => store.setSettings(filterRendererSettings(patch)));
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
