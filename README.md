@@ -38,3 +38,6 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.7.2
 - OuteTTS-Einrichtung: sucht das llama-server-Paket in den letzten 12 llama.cpp-Releases (das neueste hatte noch keine Windows-Dateien) und nennt bei Misserfolg die Anzahl der Dateien.
+
+## Neu in 1.7.3
+- Alten Stimmen-Server auf Port 8004 beenden funktioniert jetzt auch auf deutschem Windows (netstat schreibt dort „ABHÖREN“ statt „LISTENING“). Beim Einrichten wird zusätzlich geprüft, dass wirklich der neue Server (OuteTTS bzw. Chatterbox) antwortet.

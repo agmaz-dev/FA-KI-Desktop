@@ -28,7 +28,7 @@ if args.cache:
 os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-STATE = {'state': 'loading', 'detail': 'Modell wird geladen (beim ersten Mal wird es heruntergeladen) …', 'device': ''}
+STATE = {'engine': 'chatterbox', 'state': 'loading', 'detail': 'Modell wird geladen (beim ersten Mal wird es heruntergeladen) …', 'device': ''}
 MODEL = {'m': None}
 LOCK = threading.Lock()
 GEN = {'n': 0}  # wird bei /cancel hochgezählt; laufende Aufträge brechen dann ab

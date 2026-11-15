@@ -260,6 +260,10 @@ function registerIpc() {
       try {
         if (!st.ok) throw new Error(st.error);
         const ready = await voiceInst.waitReady();
+        const want = mode === 'oute' ? 'oute' : 'chatterbox';
+        if ((ready.engine || 'chatterbox') !== want) {
+          throw new Error('Auf Port 8004 läuft noch ein alter Stimmen-Server und hat den neuen verdrängt. Beende die App, im Task-Manager alle „python.exe“ (Details) und starte sie neu.');
+        }
         send('voice:progress', { text: 'Testsatz wird erzeugt (1/2) …', pct: 92 });
         const cold = await voiceInst.benchmark(sample);
         send('voice:progress', { text: 'Testsatz wird erzeugt (2/2) …', pct: 96 });

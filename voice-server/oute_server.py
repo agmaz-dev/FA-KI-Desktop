@@ -32,7 +32,7 @@ if args.cache:
 os.environ.setdefault('HF_HUB_DISABLE_SYMLINKS_WARNING', '1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-STATE = {'state': 'loading', 'detail': 'Modell wird gestartet …', 'device': '', 'langs': ['de']}
+STATE = {'engine': 'oute', 'state': 'loading', 'detail': 'Modell wird gestartet …', 'device': '', 'langs': ['de']}
 IFACE = {'i': None, 'proc': None}
 SPEAKERS = {}
 LOCK = threading.Lock()
