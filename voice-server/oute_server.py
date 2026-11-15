@@ -55,7 +55,7 @@ def _health(timeout=2):
 
 
 def _start_llama(ngl):
-    cmd = [args.llama, '-m', args.gguf, '-c', '8192', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
+    cmd = [args.llama, '-m', args.gguf, '-c', '4096', '-ngl', str(ngl), '--host', '127.0.0.1', '--port', str(args.llama_port)]
     flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     try:
         os.makedirs(args.cache, exist_ok=True)
@@ -115,7 +115,7 @@ def _patch_llama_tokens():
 
     def _generate(self, input_ids, config):
         body = {
-            'prompt': input_ids, 'stream': False, 'return_tokens': True, 'n_predict': config.max_length,
+            'prompt': input_ids, 'stream': False, 'return_tokens': True, 'cache_prompt': True, 'n_predict': config.max_length,
             'top_p': config.sampler_config.top_p, 'top_k': config.sampler_config.top_k,
             'min_p': config.sampler_config.min_p if hasattr(config.sampler_config, 'min_p') else 0.05,
             'repeat_penalty': config.sampler_config.repetition_penalty,
@@ -228,13 +228,14 @@ def synth(text, voice, my_gen):
             try:
                 return iface.generate(GenerationConfig(
                     text=text, speaker=sp, generation_type=GenerationType.CHUNKED,
-                    sampler_config=SamplerConfig(temperature=0.4), max_length=3000, server_host=LLAMA_URL,
+                    sampler_config=SamplerConfig(temperature=0.4), max_length=1800, server_host=LLAMA_URL,
                 ))
             except Exception as e:  # noqa: BLE001
                 if 'non-empty list' in str(e) or 'Tensors' in str(e):
                     return None  # keine Audio-Tokens vom llama-server
                 raise
 
+        t_start = time.time()
         out = run()
         if (out is None or getattr(out, 'audio', None) is None) and STATE.get('device') == 'gpu':
             STATE['detail'] = 'Grafikkarte liefert kein Audio, Prozessor wird versucht …'
@@ -245,6 +246,11 @@ def synth(text, voice, my_gen):
     if out is None or getattr(out, 'audio', None) is None:
         raise RuntimeError('Es wurde kein Audio erzeugt.')
     a = out.audio.detach().cpu().float().numpy().squeeze()
+    try:
+        with open(os.path.join(args.cache or '.', 'tts-timing.log'), 'a', encoding='utf-8') as lf:
+            lf.write(f'{time.strftime("%H:%M:%S")} Zeichen={len(text)} Rechenzeit={time.time() - t_start:.1f}s Audio={len(a) / int(out.sr):.1f}s Geraet={STATE.get("device")}\n')
+    except Exception:  # noqa: BLE001
+        pass
     buf = io.BytesIO()
     sf.write(buf, a.astype('float32'), int(out.sr), format='WAV', subtype='PCM_16')
     return buf.getvalue()
