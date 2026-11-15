@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { readPdf, prepareImage, isPdf, isImage } from './docs.js';
 import { startRecording, speak, stopSpeaking } from './audio.js';
 import { fitText, formatBytes } from '../lib/util.js';
-import { buildThink } from '../lib/ollama.js';
+import { buildThink } from '../lib/think.js';
 import { $, el, icon, iconButton, applyIcons, openModal, closeModal, newId } from './ui.js';
 import { openSettings, profilePrompt } from './settings.js';
 

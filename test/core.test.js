@@ -294,3 +294,40 @@ test('Supertonic: Stopp verwirft laufende und wartende Sätze', async () => {
   const wav = await s.synthesize('Neu.', 'de', 'elena', 1, 2);
   assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
 });
+
+test('Ollama: Fehler mitten im Stream schließt die Verbindung, Abbruch und Umlaut-Grenze', async () => {
+  let closed = false;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      const j = JSON.parse(b);
+      if (j.model === 'split') {
+        const s = Buffer.from(JSON.stringify({ message: { content: 'Grüße' } }) + '\n');
+        const i = s.indexOf(0xc3);
+        res.write(s.subarray(0, i + 1));
+        setTimeout(() => { res.write(s.subarray(i + 1)); res.end(JSON.stringify({ done: true })); }, 30);
+        return;
+      }
+      res.write(JSON.stringify({ message: { content: 'a' } }) + '\n');
+      if (j.model === 'err') res.write(JSON.stringify({ error: 'out of memory' }) + '\n');
+      const t = setInterval(() => res.write(JSON.stringify({ message: { content: 'x' } }) + '\n'), 20);
+      res.on('close', () => { clearInterval(t); closed = true; });
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  let text = '';
+  await ollama.chatStream(base, { model: 'split', messages: [] }, (o) => { if (o.message) text += o.message.content; });
+  assert.strictEqual(text, 'Grüße');
+  await assert.rejects(ollama.chatStream(base, { model: 'err', messages: [] }, () => {}), /out of memory/);
+  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(closed, 'Verbindung muss nach Fehlerzeile geschlossen werden');
+  closed = false;
+  const c = new AbortController();
+  setTimeout(() => c.abort(), 80);
+  await assert.rejects(ollama.chatStream(base, { model: 'slow', messages: [] }, () => {}, c.signal));
+  assert.ok(c.signal.aborted);
+  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(closed, 'Abbruch muss die Verbindung schließen');
+  srv.close();
+});
