@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Store, DEFAULT_SETTINGS } = require('./lib/store');
@@ -10,6 +10,8 @@ const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
 const { VoiceInstaller } = require('./lib/voiceinstall');
 const { Supertonic } = require('./lib/supertonic');
+const tools = require('./lib/tools');
+const github = require('./lib/github');
 
 let win = null;
 let store = null;
@@ -129,7 +131,28 @@ if (!gotLock) {
 const base = () => store.getSettings().ollamaUrl;
 
 // Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
-const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir']);
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc']);
+
+// GitHub-Token: verschlüsselt (Windows-Anmeldedaten) im Hauptprozess; die Oberfläche sieht ihn nie.
+function getGithubToken() {
+  const enc = store.getSettings().githubTokenEnc || '';
+  if (!enc) return '';
+  try {
+    if (enc.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(enc.slice(4), 'base64'));
+    if (enc.startsWith('raw:')) return enc.slice(4);
+  } catch { /* nicht lesbar */ }
+  return '';
+}
+function setGithubToken(token) {
+  let enc = '';
+  if (token) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(token).toString('base64') : 'raw:' + token;
+  store.setSettings({ githubTokenEnc: enc });
+}
+/** Einstellungen für die Oberfläche: ohne Token, mit Hinweis, ob einer da ist. */
+function publicSettings(s) {
+  const { githubTokenEnc, ...rest } = s;
+  return { ...rest, githubHasToken: !!githubTokenEnc };
+}
 /** Lässt aus der Oberfläche nur bekannte, unkritische Einstellungen durch. */
 function filterRendererSettings(patch) {
   const out = {};
@@ -142,8 +165,24 @@ function filterRendererSettings(patch) {
 
 function registerIpc() {
   // ---------- Einstellungen & Chats ----------
-  ipcMain.handle('settings:get', () => store.getSettings());
-  ipcMain.handle('settings:set', (_e, patch) => store.setSettings(filterRendererSettings(patch)));
+  ipcMain.handle('settings:get', () => publicSettings(store.getSettings()));
+  ipcMain.handle('settings:set', (_e, patch) => publicSettings(store.setSettings(filterRendererSettings(patch))));
+  ipcMain.handle('github:setToken', async (_e, token) => {
+    const t = String(token || '').trim();
+    if (!t) { setGithubToken(''); return { ok: true, login: '' }; }
+    try {
+      const login = await github.whoami(t);
+      setGithubToken(t);
+      return { ok: true, login };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
+  });
+  ipcMain.handle('github:test', async () => {
+    const t = getGithubToken();
+    if (!t) return { ok: false, error: 'Kein Token gespeichert' };
+    try { return { ok: true, login: await github.whoami(t) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  });
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
@@ -230,16 +269,26 @@ function registerIpc() {
   });
   ipcMain.handle('ollama:pullCancel', () => { if (pullController) pullController.abort(); return true; });
 
-  ipcMain.handle('chat:start', async (_e, { id, body }) => {
+  ipcMain.handle('chat:start', async (_e, { id, body, useTools }) => {
     const ctrl = new AbortController();
     chatControllers.set(id, ctrl);
     let stats = null;
     try {
-      await ollama.chatStream(base(), body, (o) => {
+      const onObj = (o) => {
         const m = o.message || {};
         if (m.content || m.thinking) send('chat:delta', { id, content: m.content || '', thinking: m.thinking || '' });
         if (o.done) stats = { evalCount: o.eval_count, evalDuration: o.eval_duration, doneReason: o.done_reason };
-      }, ctrl.signal);
+      };
+      const toolList = useTools ? tools.toolsFor(store.getSettings()) : [];
+      if (toolList.length) {
+        await tools.chatWithTools({
+          chatStream: (b, cb, sig) => ollama.chatStream(base(), b, cb, sig),
+          body, tools: toolList, ctx: { getToken: getGithubToken }, signal: ctrl.signal, onObj,
+          onTool: ({ label }) => send('chat:tool', { id, label }),
+        });
+      } else {
+        await ollama.chatStream(base(), body, onObj, ctrl.signal);
+      }
       send('chat:done', { id, stats });
     } catch (e) {
       if (ctrl.signal.aborted) send('chat:done', { id, stats, aborted: true });
@@ -353,7 +402,7 @@ function registerIpc() {
         send('voice:progress', { text: 'Testsatz wird erzeugt (2/2) …', pct: 96 });
         const warm = await voiceInst.benchmark(sample);
         send('voice:progress', { text: 'Fertig.', pct: 100 });
-        return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, settings: store.getSettings() };
+        return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, settings: publicSettings(store.getSettings()) };
       } catch (e) {
         await procs.stop('tts');
         await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
@@ -362,7 +411,7 @@ function registerIpc() {
         throw e;
       }
     } catch (e) {
-      return { ok: false, error: String(e.message || e), settings: store.getSettings() };
+      return { ok: false, error: String(e.message || e), settings: publicSettings(store.getSettings()) };
     }
   });
   ipcMain.handle('ollama:ensure', () => procs.ensureOllama(base()));

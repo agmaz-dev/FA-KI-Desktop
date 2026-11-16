@@ -150,6 +150,34 @@ export async function openSettings(ctx, startTab = 'general') {
     body.appendChild(two);
     body.appendChild(formRow('Modell im Speicher halten', bind(selectOf([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive), 'keepAlive'), 'Solange bleibt das Modell geladen, damit die nächste Antwort sofort kommt.'));
     body.appendChild(formRow('Standard-Denktiefe', bind(selectOf([['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], draft.think), 'think'), 'Bei gpt-oss. Du kannst sie im Chat jederzeit ändern.'));
+
+    body.appendChild(el('h3', null, 'Internet und GitHub'));
+    body.lastChild.style.margin = '22px 0 8px';
+    const wt = switchRow('Internetsuche und Seiten lesen', 'Die KI darf im Web suchen, Seiten lesen und Shop-Links (eBay, Kleinanzeigen …) bauen. Ohne Konto und ohne Schlüssel; die Anfragen gehen direkt von Deinem PC raus. Nur bei Modellen mit Werkzeug-Unterstützung (z. B. gpt-oss, Qwen).', draft.webTools);
+    bind(wt.cb, 'webTools');
+    body.appendChild(wt.row);
+    const gt = switchRow('GitHub lesen', 'Die KI darf Deine Repos und Dateien auf GitHub lesen. Sie kann nichts ändern oder löschen.', draft.githubTools);
+    bind(gt.cb, 'githubTools');
+    body.appendChild(gt.row);
+    const tok = input('password', '', { placeholder: draft.githubHasToken ? 'Token ist gespeichert (zum Ersetzen neuen eintragen)' : 'GitHub-Token einfügen', autocomplete: 'off' });
+    body.appendChild(formRow('GitHub-Token', tok, 'Auf github.com unter Settings → Developer settings → Personal access tokens erzeugen, nur mit Leserechten (Contents: Read-only). Er wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben. Für öffentliche Repos brauchst Du keinen.'));
+    const tstat = el('div', 'note', draft.githubHasToken ? 'Ein Token ist gespeichert.' : 'Kein Token gespeichert.');
+    const row = el('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
+    const saveTok = el('button', 'btn small', 'Token speichern und prüfen');
+    saveTok.onclick = async () => {
+      const v = tok.value.trim();
+      if (!v) { tstat.textContent = 'Bitte zuerst einen Token einfügen.'; return; }
+      tstat.textContent = 'Prüfe …';
+      const r = await api.github.setToken(v);
+      if (r.ok) { tok.value = ''; draft.githubHasToken = true; tstat.textContent = 'Gespeichert. Angemeldet als ' + (r.login || '?') + '.'; }
+      else tstat.textContent = 'Nicht gespeichert: ' + r.error;
+    };
+    const delTok = el('button', 'btn small', 'Token entfernen');
+    delTok.onclick = async () => { await api.github.setToken(''); draft.githubHasToken = false; tstat.textContent = 'Token entfernt.'; };
+    row.append(saveTok, delTok);
+    body.appendChild(row);
+    body.appendChild(tstat);
   }
 
   // ---------- Profile ----------
