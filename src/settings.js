@@ -1,13 +1,13 @@
 import { el, $, icon, formRow, selectOf, input, textarea, switchRow, newId } from './ui.js';
 
-const TABS = [
-  ['general', 'Allgemein', 'sliders'],
-  ['ai', 'KI und Modell', 'cpu'],
-  ['tools', 'Internet und Agent', 'globe'],
-  ['profiles', 'Profile', 'user'],
-  ['speech', 'Sprache', 'speaker'],
-  ['data', 'Daten und Info', 'download'],
+// Aufbau wie bei Bionic: Gruppen links, „Erkunden“ und „Bibliothek“ stehen unter „Lokale Modelle“.
+const GROUPS = [
+  ['App', [['general', 'Allgemein', 'gear'], ['profiles', 'Profile', 'user']]],
+  ['Assistent', [['tools', 'Internet und Agent', 'globe'], ['speech', 'Sprache', 'speaker']]],
+  ['Lokale Modelle', [['explore', 'Erkunden', 'compass'], ['library', 'Bibliothek', 'library'], ['ai', 'Standardwerte für lokale Modelle', 'sliders']]],
+  ['System', [['data', 'Daten und Info', 'download']]],
 ];
+const TAB_TITLE = Object.fromEntries(GROUPS.flatMap(([, items]) => items.map(([id, label]) => [id, label])));
 
 export const PROFILE_FIELDS = [
   ['fullName', 'Vollständiger Name'],
@@ -42,12 +42,15 @@ export function profilePrompt(p) {
 }
 
 /**
- * ctx: { settings, api, mount(build), close(), apply(draft), hint, showProgress, hideProgress, onSaved(settings), speakSample(text, draft), onChatsCleared() }
+ * ctx: { settings, api, mount(build), close(), explore(root), library(root), apply(draft), hint, showProgress, hideProgress, onSaved(settings), speakSample(text, draft), onChatsCleared() }
  */
 export async function openSettings(ctx, startTab = 'general') {
   const draft = JSON.parse(JSON.stringify(ctx.settings));
   if (!Array.isArray(draft.profiles)) draft.profiles = [];
   let tab = startTab;
+  const hist = [startTab];
+  let hpos = 0;
+  const go = (id) => { if (id === tab) return; hist.length = hpos + 1; hist.push(id); hpos++; tab = id; render(); };
   let selProfile = draft.activeProfile || (draft.profiles[0] && draft.profiles[0].id) || '';
 
   const api = ctx.api;
@@ -74,14 +77,25 @@ export async function openSettings(ctx, startTab = 'general') {
       back.onclick = () => { ctx.apply(ctx.settings); ctx.close(); };
       nav.appendChild(back);
       nav.appendChild(el('h2', null, 'Einstellungen'));
-      for (const [id, label, ic] of TABS) {
-        const b = el('button', id === tab ? 'active' : '');
-        b.innerHTML = icon(ic, 17) + '<span>' + label + '</span>';
-        b.onclick = () => { tab = id; render(); };
-        nav.appendChild(b);
+      for (const [group, items] of GROUPS) {
+        nav.appendChild(el('div', 'nav-group', group));
+        for (const [id, label, ic] of items) {
+          const b = el('button', id === tab ? 'active' : '');
+          b.innerHTML = icon(ic, 17) + '<span>' + label + '</span>';
+          b.onclick = () => go(id);
+          nav.appendChild(b);
+        }
       }
       const main = el('div', 'set-main');
-      const body = el('div', 'set-body');
+      const bar = el('div', 'set-bar');
+      const prev = el('button', 'icon-btn'); prev.innerHTML = icon('chevleft', 16); prev.title = 'Zurück'; prev.disabled = hpos <= 0;
+      const next = el('button', 'icon-btn'); next.innerHTML = icon('chevright', 16); next.title = 'Vorwärts'; next.disabled = hpos >= hist.length - 1;
+      prev.onclick = () => { hpos--; tab = hist[hpos]; render(); };
+      next.onclick = () => { hpos++; tab = hist[hpos]; render(); };
+      bar.append(prev, next, el('div', 'set-bar-title', TAB_TITLE[tab] || ''));
+      main.appendChild(bar);
+      const isModels = tab === 'explore' || tab === 'library';
+      const body = el('div', 'set-body' + (isModels ? ' flush' : ''));
       main.appendChild(body);
       const foot = el('div', 'set-foot');
       const saved = el('span', 'msg-saved', '');
@@ -98,10 +112,12 @@ export async function openSettings(ctx, startTab = 'general') {
         setTimeout(() => { saved.textContent = ''; }, 2500);
       };
       foot.append(saved, cancel, save);
-      main.appendChild(foot);
+      if (!isModels) main.appendChild(foot);
       m.append(nav, main);
 
-      ({ general, ai, tools, profiles, speech, data })[tab](body, st);
+      if (tab === 'explore') ctx.explore(body);
+      else if (tab === 'library') ctx.library(body);
+      else ({ general, ai, tools, profiles, speech, data })[tab](body, st);
     });
   }
 
@@ -146,7 +162,7 @@ export async function openSettings(ctx, startTab = 'general') {
 
   // ---------- KI ----------
   function ai(body) {
-    body.appendChild(el('h2', null, 'KI und Modell'));
+    body.appendChild(el('h2', null, 'Standardwerte für lokale Modelle'));
     const sys = bind(textarea(draft.systemPrompt, 6), 'systemPrompt');
     body.appendChild(formRow('Grundanweisung an die KI', sys, 'Gilt für jeden Chat. Die Angaben des aktiven Profils werden automatisch dazugegeben.'));
     const two = el('div', 'two');

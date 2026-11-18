@@ -125,6 +125,9 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Piper-Stimmen werden beim Start nur noch nachgeladen, wenn Piper auch als Stimme genutzt wird.
 - Build: whisper.cpp ist auf v1.9.5 angepinnt, `whisper-server.exe` wird mitgeliefert (der Build prüft das), ein vorhandenes Release wird nicht mehr überschrieben, der Workflow prüft auch Pull Requests und hat ein Zeitlimit von 45 Minuten.
 
+## Neu in 1.10.1
+Oberfläche wie bei Bionic: „Erkunden“ und „Bibliothek“ liegen in Einstellungen → Lokale Modelle, gruppierte Navigation mit Zurück/Vorwärts, Eingabe „Gib FA KI eine Aufgabe“. Farben bleiben die von FA KI.
+
 ## Neu in 1.10.0 – Agent, Erkunden, Bibliothek und neue Oberfläche
 
 **Agent (arbeitet wie ein Programmierer)**

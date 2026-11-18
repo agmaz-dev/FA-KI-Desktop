@@ -1,4 +1,5 @@
-// Seiten „Erkunden“ (Modelle suchen und laden) und „Bibliothek“ (installierte Modelle)
+// „Erkunden“ (Modelle suchen und laden) und „Bibliothek“ (installierte Modelle)
+// Beide Seiten liegen in den Einstellungen unter „Lokale Modelle“ (wie bei Bionic).
 import { el, icon } from './ui.js';
 import { formatBytes } from '../lib/util.js';
 
@@ -6,46 +7,58 @@ const fmtNum = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Mio
 const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 const FIT_CLASS = { gpu: 'ok', teils: 'warn', nein: 'bad' };
 
-function pageHead(title, sub, onBack) {
-  const h = el('div', 'page-head');
-  const b = el('button', 'back-btn');
-  b.innerHTML = icon('arrowleft', 17) + '<span>Zurück zum Chat</span>';
-  b.onclick = onBack;
-  const t = el('div', 'grow');
-  t.appendChild(el('h1', null, title));
-  if (sub) t.appendChild(el('div', 'note', sub));
-  h.append(b, t);
-  return h;
+function ago(iso) {
+  const t = Date.parse(iso || '');
+  if (!t) return '';
+  const d = Math.max(0, Math.round((Date.now() - t) / 86400000));
+  if (d < 1) return 'heute';
+  if (d === 1) return 'vor 1 Tag';
+  if (d < 60) return `vor ${d} Tagen`;
+  const m = Math.round(d / 30);
+  return m < 24 ? `vor ${m} Monaten` : `vor ${Math.round(d / 365)} Jahren`;
+}
+
+function searchBox(placeholder, onInput) {
+  const box = el('div', 'search-box');
+  const ic = el('span', 'sb-icon'); ic.innerHTML = icon('search', 16);
+  const inp = el('input'); inp.type = 'text'; inp.placeholder = placeholder;
+  const clr = el('button', 'sb-clear'); clr.type = 'button'; clr.innerHTML = icon('x', 14); clr.title = 'Leeren'; clr.classList.add('hidden');
+  clr.onclick = () => { inp.value = ''; clr.classList.add('hidden'); inp.focus(); onInput(true); };
+  inp.addEventListener('input', () => { clr.classList.toggle('hidden', !inp.value); onInput(false); });
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') onInput(true); });
+  box.append(ic, inp, clr);
+  return { box, inp };
 }
 
 /**
- * ctx: { api, models() -> Liste, refreshModels(), useModel(name), back(), renderMd(text), hint(text) }
+ * ctx: { api, models() -> Liste, refreshModels(), useModel(name), renderMd(text), hint(text), goTab(id) }
  */
 export function mountExplore(root, ctx) {
   root.innerHTML = '';
   const api = ctx.api;
-  const page = el('div', 'page explore');
-  page.appendChild(pageHead('Erkunden', 'Modelle auf Hugging Face suchen und mit einem Klick laden. Geladen wird über Ollama, alles läuft danach lokal auf diesem PC.', ctx.back));
+  const page = el('div', 'explore');
+  const { box: sbox, inp: q } = searchBox('Modelle auf Hugging Face suchen, z. B. qwen, gpt-oss, gemma', (now) => { if (now) doSearch(); });
+  page.appendChild(sbox);
 
-  const bar = el('div', 'search-bar');
-  const q = el('input'); q.type = 'text'; q.placeholder = 'Modell suchen, z. B. qwen, gpt-oss, gemma, llama';
-  const sort = document.createElement('select');
-  for (const [v, t] of [['downloads', 'Beliebteste'], ['trendingScore', 'Im Trend'], ['likes', 'Meiste Likes'], ['lastModified', 'Zuletzt geändert']]) { const o = el('option', null, t); o.value = v; sort.appendChild(o); }
-  const go = el('button', 'btn primary', 'Suchen');
-  bar.append(q, sort, go);
-  page.appendChild(bar);
+  const info = el('div', 'result-bar');
+  const count = el('span', 'note', '');
+  const refresh = el('button', 'icon-btn small'); refresh.innerHTML = icon('refresh2', 14); refresh.title = 'Neu suchen'; refresh.onclick = () => doSearch();
+  const sort = document.createElement('select'); sort.className = 'mini';
+  for (const [v, t] of [['downloads', 'Beliebteste'], ['trendingScore', 'Im Trend'], ['likes', 'Meiste Likes'], ['lastModified', 'Neueste']]) { const o = el('option', null, t); o.value = v; sort.appendChild(o); }
+  const left0 = el('div', 'rb-left'); left0.append(count, refresh);
+  info.append(left0, sort);
 
   const cols = el('div', 'cols');
   const left = el('div', 'col-list');
   const right = el('div', 'col-detail');
-  cols.append(left, right);
+  const listWrap = el('div', 'list-wrap'); listWrap.append(info, left);
+  cols.append(listWrap, right);
   page.appendChild(cols);
   root.appendChild(page);
 
   let selected = '';
   let busy = false;
   let offPull = null;
-
   const installedNames = () => new Set((ctx.models() || []).map((m) => m.name.toLowerCase()));
 
   function showEmpty() {
@@ -58,14 +71,14 @@ export function mountExplore(root, ctx) {
     const inp = el('input'); inp.type = 'text'; inp.placeholder = 'gpt-oss:20b';
     const b = el('button', 'btn', 'Laden');
     const st = el('div', 'note');
-    b.onclick = () => { if (inp.value.trim()) download(inp.value.trim(), st, b); };
+    b.onclick = () => { if (inp.value.trim()) download(inp.value.trim(), st, b, 'Laden'); };
     inl.append(inp, b);
     direct.append(inl, st);
     e.appendChild(direct);
     right.appendChild(e);
   }
 
-  async function download(name, statusEl, btn) {
+  async function download(name, statusEl, btn, label = 'Laden') {
     if (busy) return ctx.hint('Es läuft schon ein Download.');
     if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
     busy = true;
@@ -84,7 +97,7 @@ export function mountExplore(root, ctx) {
         if (selected) openDetail(selected, true);
       }
     } catch (e) { statusEl.textContent = 'Fehler: ' + cleanErr(e); }
-    finally { busy = false; if (btn) { btn.disabled = false; btn.textContent = 'Herunterladen'; } if (offPull) { offPull(); offPull = null; } }
+    finally { busy = false; if (btn) { btn.disabled = false; btn.textContent = label; } if (offPull) { offPull(); offPull = null; } }
   }
 
   async function openDetail(id, keepScroll) {
@@ -97,20 +110,21 @@ export function mountExplore(root, ctx) {
     try { d = await api.hf.details(id); } catch (e) { right.innerHTML = ''; right.appendChild(el('div', 'err', 'Details nicht ladbar: ' + cleanErr(e))); return; }
     if (selected !== id) return;
     right.innerHTML = '';
-    right.appendChild(el('h2', null, d.id));
-    const meta = el('div', 'meta-row');
-    meta.appendChild(el('span', 'badge', fmtNum(d.downloads) + ' Downloads'));
-    meta.appendChild(el('span', 'badge', fmtNum(d.likes) + ' Likes'));
-    if (d.architektur) meta.appendChild(el('span', 'badge', d.architektur));
-    if (d.kontext) meta.appendChild(el('span', 'badge', 'Kontext bis ' + fmtNum(d.kontext)));
-    for (const f of d.features) meta.appendChild(el('span', 'badge feat', f));
-    right.appendChild(meta);
-    if (d.features.length) right.appendChild(el('div', 'note', 'Bilder, Werkzeuge und Denken sind nur aus den Schlagworten des Modells geschätzt und können fehlen oder abweichen.'));
+    const [author, name] = d.id.split('/');
+    right.appendChild(el('h2', null, name));
+    right.appendChild(el('div', 'repo-id', d.id));
+    const stats = el('div', 'stats-row');
+    stats.appendChild(el('span', null, '↓ ' + fmtNum(d.downloads)));
+    stats.appendChild(el('span', null, '♥ ' + fmtNum(d.likes)));
+    if (d.updated) stats.appendChild(el('span', null, 'Aktualisiert ' + ago(d.updated)));
+    const web = el('a', 'web-link', 'Im Web öffnen ↗'); web.href = 'https://huggingface.co/' + d.id; web.target = '_blank'; web.rel = 'noreferrer';
+    stats.appendChild(web);
+    right.appendChild(stats);
 
+    right.appendChild(el('h3', null, 'Download-Optionen'));
     if (!d.quants.length) {
       right.appendChild(el('div', 'err', 'In diesem Repo liegen keine direkt ladbaren GGUF-Dateien.'));
     } else {
-      right.appendChild(el('h3', null, 'Stufen (Quantisierung)'));
       const have = installedNames();
       const tbl = el('div', 'quant-table');
       const status = el('div', 'note dl-status');
@@ -123,7 +137,7 @@ export function mountExplore(root, ctx) {
         const act = el('div', 'q-act');
         if (have.has(qn.pull.toLowerCase())) act.appendChild(el('span', 'badge ok', 'Installiert'));
         else {
-          const b = el('button', 'btn small' + (qn.empfohlen ? ' primary' : ''), 'Herunterladen');
+          const b = el('button', 'btn small' + (qn.empfohlen ? ' primary' : ''), 'Laden');
           b.onclick = () => download(qn.pull, status, b);
           act.appendChild(b);
         }
@@ -133,12 +147,22 @@ export function mountExplore(root, ctx) {
       right.appendChild(tbl);
       const stop = el('button', 'btn small', 'Download abbrechen');
       stop.onclick = () => api.ollama.pullCancel();
-      right.appendChild(status);
-      right.appendChild(stop);
-      right.appendChild(el('div', 'note', 'Größere Stufen sind genauer, brauchen aber mehr Speicher. „Passt auf Deine Karte“ rechnet mit dem Wert aus Einstellungen → KI und Modell.'));
+      right.append(status, stop);
     }
+
+    right.appendChild(el('h3', null, 'Details'));
+    const kv = el('div', 'kv-grid');
+    const add = (k, v) => { if (!v) return; kv.appendChild(el('span', 'k', k)); const vv = el('span', 'v'); if (Array.isArray(v)) v.forEach((x) => vv.appendChild(el('span', 'badge feat', x))); else vv.appendChild(el('span', 'badge', v)); kv.appendChild(vv); };
+    add('Parameter', d.parameter);
+    add('Architektur', d.architektur);
+    add('Formate', 'GGUF');
+    add('Kontext', d.kontext ? fmtNum(d.kontext) + ' Tokens' : '');
+    add('Funktionen', d.features);
+    right.appendChild(kv);
+    if (d.features.length) right.appendChild(el('div', 'note', 'Funktionen sind nur aus den Schlagworten des Modells geschätzt und können fehlen oder abweichen. „Passt auf Deine Karte“ rechnet mit den Werten aus Einstellungen → Standardwerte für lokale Modelle.'));
+
     if (d.readme) {
-      right.appendChild(el('h3', null, 'Beschreibung'));
+      right.appendChild(el('h3', null, 'README'));
       const md = el('div', 'md readme');
       md.innerHTML = ctx.renderMd(d.readme);
       md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
@@ -150,19 +174,20 @@ export function mountExplore(root, ctx) {
 
   async function doSearch() {
     left.innerHTML = '';
-    left.appendChild(el('div', 'note', 'Suche …'));
+    count.textContent = 'Suche …';
     let list = [];
     try { list = await api.hf.search({ query: q.value.trim(), sort: sort.value }); }
-    catch (e) { left.innerHTML = ''; left.appendChild(el('div', 'err', 'Suche nicht möglich: ' + cleanErr(e))); return; }
-    left.innerHTML = '';
+    catch (e) { count.textContent = ''; left.appendChild(el('div', 'err', 'Suche nicht möglich: ' + cleanErr(e))); return; }
+    count.textContent = `${list.length} Ergebnisse auf Hugging Face`;
     if (!list.length) { left.appendChild(el('div', 'note', 'Nichts gefunden.')); return; }
-    left.appendChild(el('div', 'note', `${list.length} Ergebnisse (Hugging Face, GGUF)`));
     for (const m of list) {
+      const [author, name] = m.id.split('/');
       const c = el('button', 'model-card' + (m.id === selected ? ' active' : ''));
       c.dataset.id = m.id;
-      c.appendChild(el('div', 'mc-name', m.id));
+      c.appendChild(el('div', 'mc-name', name));
+      c.appendChild(el('div', 'mc-author', author));
       const sub = el('div', 'mc-sub');
-      sub.appendChild(el('span', null, fmtNum(m.downloads) + ' Downloads'));
+      sub.appendChild(el('span', null, '↓ ' + fmtNum(m.downloads)));
       for (const f of m.features) sub.appendChild(el('span', 'badge feat', f));
       c.appendChild(sub);
       c.onclick = () => openDetail(m.id);
@@ -170,9 +195,7 @@ export function mountExplore(root, ctx) {
     }
   }
 
-  go.onclick = doSearch;
   sort.onchange = doSearch;
-  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
   showEmpty();
   doSearch();
   return () => { if (offPull) offPull(); };
@@ -181,29 +204,49 @@ export function mountExplore(root, ctx) {
 export function mountLibrary(root, ctx) {
   root.innerHTML = '';
   const api = ctx.api;
-  const page = el('div', 'page library');
-  page.appendChild(pageHead('Bibliothek', 'Deine installierten Modelle: im Chat verwenden oder löschen.', ctx.back));
+  const page = el('div', 'library');
+  page.appendChild(el('h2', null, 'Meine Modelle'));
+
+  const dirRow = el('div', 'dir-row');
+  const dic = el('span', 'dr-icon'); dic.innerHTML = icon('library', 18);
+  const dtxt = el('div', 'grow');
+  dtxt.appendChild(el('div', 'lc-name', 'Ollama'));
+  dtxt.appendChild(el('div', 'note', 'Die Modelle liegen im Ollama-Ordner dieses PCs.'));
+  dirRow.append(dic, dtxt);
+  page.appendChild(dirRow);
+
+  let all = [];
+  const { box: sbox, inp: filter } = searchBox('Installierte Modelle filtern', () => draw());
+  page.appendChild(sbox);
+  const bar = el('div', 'result-bar');
+  const count = el('span', 'note', '');
+  const sort = document.createElement('select'); sort.className = 'mini';
+  for (const [v, t] of [['new', 'Neueste'], ['name', 'Name'], ['size', 'Größe']]) { const o = el('option', null, t); o.value = v; sort.appendChild(o); }
+  sort.onchange = () => draw();
+  bar.append(count, sort);
+  page.appendChild(bar);
   const box = el('div', 'lib-list');
   page.appendChild(box);
   root.appendChild(page);
 
-  async function render() {
+  function draw() {
     box.innerHTML = '';
-    let list = [];
-    try { list = await api.ollama.models(); }
-    catch { box.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); return; }
-    if (!list.length) {
+    const f = filter.value.trim().toLowerCase();
+    const current = (ctx.currentModel && ctx.currentModel()) || '';
+    let list = all.filter((m) => !f || m.name.toLowerCase().includes(f));
+    list = list.slice().sort((a, b) => sort.value === 'name' ? a.name.localeCompare(b.name) : sort.value === 'size' ? (b.size || 0) - (a.size || 0) : String(b.modified).localeCompare(String(a.modified)));
+    const total = all.filter((m) => !m.remote).reduce((n, m) => n + (m.size || 0), 0);
+    count.textContent = `${list.length} von ${all.length} Modellen werden angezeigt · zusammen ${formatBytes(total)}`;
+    if (!all.length) {
       const e = el('div', 'detail-empty');
       e.appendChild(el('div', null, 'Noch keine Modelle installiert.'));
       const b = el('button', 'btn primary', 'Zu „Erkunden“');
-      b.onclick = () => ctx.goExplore();
+      b.onclick = () => ctx.goTab('explore');
       e.appendChild(b);
       box.appendChild(e);
       return;
     }
-    const total = list.filter((m) => !m.remote).reduce((n, m) => n + (m.size || 0), 0);
-    box.appendChild(el('div', 'note', `${list.length} Modelle, zusammen ${formatBytes(total)} auf der Festplatte`));
-    const current = (ctx.currentModel && ctx.currentModel()) || '';
+    if (!list.length) { box.appendChild(el('div', 'note', 'Keine Modelle entsprechen diesem Filter.')); return; }
     for (const m of list) {
       const row = el('div', 'lib-card' + (m.name === current ? ' active' : ''));
       const info = el('div', 'grow');
@@ -227,12 +270,17 @@ export function mountLibrary(root, ctx) {
       const del = el('button', 'btn small danger', 'Löschen');
       del.onclick = async () => {
         if (!confirm(`Modell „${m.name}“ von der Festplatte löschen?`)) return;
-        try { await api.ollama.remove(m.name); await ctx.refreshModels(); render(); } catch (e) { ctx.hint('Löschen fehlgeschlagen: ' + cleanErr(e), 0); }
+        try { await api.ollama.remove(m.name); await ctx.refreshModels(); await load(); } catch (e) { ctx.hint('Löschen fehlgeschlagen: ' + cleanErr(e), 0); }
       };
       row.append(info, use, del);
       box.appendChild(row);
     }
   }
-  render();
+  async function load() {
+    try { all = await api.ollama.models(); }
+    catch { box.innerHTML = ''; box.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); return; }
+    draw();
+  }
+  load();
   return () => {};
 }

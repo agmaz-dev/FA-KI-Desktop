@@ -273,6 +273,7 @@ function registerIpc() {
     return list.map((m) => ({
       name: m.name,
       size: m.size,
+      modified: m.modified_at || '',
       remote: !!(m.remote_host || m.remote_model || /:cloud$|-cloud$/i.test(m.name)),
       details: m.details || {},
     }));

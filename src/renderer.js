@@ -405,7 +405,7 @@ async function send() {
   const text = $('input').value.trim();
   if (!text && !state.pending.length) return;
   const model = $('modelSel').value;
-  if (!model) { hint('Bitte zuerst ein Modell laden: links „Erkunden“.'); return showView('explore'); }
+  if (!model) { hint('Bitte zuerst ein Modell laden (Einstellungen → Erkunden).'); return showView('settings', 'explore'); }
   if (!(await refreshStatus())) return;
   stopAllSpeech();
   if (!state.chat) state.chat = newChat();
@@ -692,28 +692,27 @@ async function pickFiles() {
   for (const f of await api.files.pick()) await addFile(f.name, f.data);
 }
 
-// ---------- Seiten: Chat, Erkunden, Bibliothek, Einstellungen ----------
+// ---------- Seiten: Chat und Einstellungen (Erkunden und Bibliothek liegen darin) ----------
 let pageCleanup = null;
 function showView(name, tab) {
   if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; }
   closeMenus();
-  const page = $('viewPage');
   const chat = name === 'chat';
   $('viewChat').classList.toggle('hidden', !chat);
-  page.classList.toggle('hidden', chat);
-  page.className = 'view' + (chat ? ' hidden' : ' page-' + name);
-  for (const [id, v] of [['navExplore', 'explore'], ['navLibrary', 'library'], ['btnSettings', 'settings']]) $(id).classList.toggle('active', name === v);
+  $('viewPage').className = 'view' + (chat ? ' hidden' : ' page-' + name);
+  $('btnSettings').classList.toggle('active', !chat);
   if (chat) { $('input').focus(); return; }
-  const common = {
-    api, back: () => showView('chat'), hint, renderMd,
+  showSettings(tab || 'general');
+}
+
+function modelsCtx() {
+  return {
+    api, hint, renderMd,
     models: () => state.models, refreshModels: loadModels,
     useModel: async (n) => { $('modelSel').value = n; renderModelMenu(); await onModelChanged(true); showView('chat'); hint('Modell gewählt: ' + n); },
-    goExplore: () => showView('explore'),
+    goTab: (id) => showView('settings', id),
     currentModel: () => $('modelSel').value,
   };
-  if (name === 'explore') pageCleanup = mountExplore(page, common);
-  else if (name === 'library') pageCleanup = mountLibrary(page, common);
-  else if (name === 'settings') showSettings(tab || 'general');
 }
 
 // ---------- Einstellungen ----------
@@ -723,6 +722,8 @@ function showSettings(tab) {
     get settings() { return state.settings; },
     api,
     mount: (build) => { page.innerHTML = ''; const wrap = el('div', 'settings-page'); page.appendChild(wrap); build(wrap); },
+    explore: (root) => { pageCleanup = mountExplore(root, modelsCtx()); },
+    library: (root) => { pageCleanup = mountLibrary(root, modelsCtx()); },
     close: () => showView('chat'),
     apply: applyAppearance,
     hint, showProgress, hideProgress,
@@ -808,12 +809,10 @@ function wire() {
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);
   $('btnSettings').onclick = () => showView('settings');
-  $('navExplore').onclick = () => showView('explore');
-  $('navLibrary').onclick = () => showView('library');
   $('btnPlus').onclick = (e) => { e.stopPropagation(); toggleMenu('plusMenu'); };
   $('modelBtn').onclick = (e) => { e.stopPropagation(); toggleMenu('modelMenu'); };
   $('modelFilter').addEventListener('input', renderModelMenu);
-  $('modelMore').onclick = () => showView('explore');
+  $('modelMore').onclick = () => showView('settings', 'explore');
   for (const id of ['plusMenu', 'modelMenu']) $(id).addEventListener('click', (e) => { if (e.target.closest('select,input')) e.stopPropagation(); });
   $('btnAttach').addEventListener('click', closeMenus);
   $('btnConv').addEventListener('click', closeMenus);
