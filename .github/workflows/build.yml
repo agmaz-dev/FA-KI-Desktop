@@ -57,6 +57,23 @@ jobs:
           name: FA-KI-Desktop-Setup-${{ steps.ver.outputs.v }}
           path: dist/FA-KI-Desktop-Setup-${{ steps.ver.outputs.v }}.exe
           if-no-files-found: error
+          retention-days: 1
+        # Ist der Artefakt-Speicher des Kontos voll, soll der Build nicht scheitern (Testversion kommt dann per Prerelease).
+        continue-on-error: true
+      - name: Testversion als Prerelease bereitstellen
+        if: github.ref != 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          F="dist/FA-KI-Desktop-Setup-$V.exe"
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if gh release view "v$V-test" >/dev/null 2>&1; then
+            gh release upload "v$V-test" "$F" --clobber
+          else
+            gh release create "v$V-test" "$F" --prerelease --target "$SHA" --title "FA KI Desktop $V (Testversion)" --notes "Testversion aus einem Pull Request."
+          fi
       - name: Release erstellen oder aktualisieren
         if: github.ref == 'refs/heads/main'
         shell: bash
