@@ -57,8 +57,6 @@ export function mountExplore(root, ctx) {
   root.appendChild(page);
 
   let selected = '';
-  let busy = false;
-  let offPull = null;
   const installedNames = () => new Set((ctx.models() || []).map((m) => m.name.toLowerCase()));
 
   function showEmpty() {
@@ -71,34 +69,18 @@ export function mountExplore(root, ctx) {
     const inp = el('input'); inp.type = 'text'; inp.placeholder = 'gpt-oss:20b';
     const b = el('button', 'btn', 'Laden');
     const st = el('div', 'note');
-    b.onclick = () => { if (inp.value.trim()) download(inp.value.trim(), st, b, 'Laden'); };
+    b.onclick = () => { if (inp.value.trim()) { download(inp.value.trim()); st.textContent = 'Download läuft – Stand siehst Du links unten und in der Bibliothek.'; } };
     inl.append(inp, b);
     direct.append(inl, st);
     e.appendChild(direct);
     right.appendChild(e);
   }
 
-  async function download(name, statusEl, btn, label = 'Laden') {
-    if (busy) return ctx.hint('Es läuft schon ein Download.');
+  function download(name) {
     if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
-    busy = true;
-    if (btn) { btn.disabled = true; btn.textContent = 'Lädt …'; }
-    if (offPull) offPull();
-    offPull = api.ollama.onPull((p) => {
-      statusEl.textContent = p.total ? `${p.status} – ${Math.round((p.completed / p.total) * 100)} % (${formatBytes(p.completed)} / ${formatBytes(p.total)})` : p.status;
-    });
-    statusEl.textContent = 'Starte Download …';
-    try {
-      const r = await api.ollama.pull(name);
-      if (r && r.aborted) statusEl.textContent = 'Download abgebrochen.';
-      else {
-        statusEl.textContent = 'Fertig. Das Modell ist jetzt in der Bibliothek.';
-        await ctx.refreshModels();
-        if (selected) openDetail(selected, true);
-      }
-    } catch (e) { statusEl.textContent = 'Fehler: ' + cleanErr(e); }
-    finally { busy = false; if (btn) { btn.disabled = false; btn.textContent = label; } if (offPull) { offPull(); offPull = null; } }
+    ctx.startPull(name);
   }
+  const offDl = ctx.dlOn(() => { const st = right.querySelector('.dl-status'); if (st) st.textContent = ctx.dl.state === 'idle' ? '' : ctx.dl.name.replace(/^hf\.co\//, '') + ': ' + ctx.dlText(); });
 
   async function openDetail(id, keepScroll) {
     selected = id;
@@ -138,7 +120,7 @@ export function mountExplore(root, ctx) {
         if (have.has(qn.pull.toLowerCase())) act.appendChild(el('span', 'badge ok', 'Installiert'));
         else {
           const b = el('button', 'btn small' + (qn.empfohlen ? ' primary' : ''), 'Laden');
-          b.onclick = () => download(qn.pull, status, b);
+          b.onclick = () => { download(qn.pull); status.textContent = 'Download gestartet – Stand auch in der Bibliothek.'; };
           act.appendChild(b);
         }
         row.append(nm, sz, fit, act);
@@ -146,7 +128,7 @@ export function mountExplore(root, ctx) {
       }
       right.appendChild(tbl);
       const stop = el('button', 'btn small', 'Download abbrechen');
-      stop.onclick = () => api.ollama.pullCancel();
+      stop.onclick = () => ctx.dlCancel();
       right.append(status, stop);
     }
 
@@ -221,7 +203,7 @@ export function mountExplore(root, ctx) {
   sort.onchange = doSearch;
   showEmpty();
   doSearch();
-  return () => { if (offPull) offPull(); };
+  return () => { offDl(); };
 }
 
 export function mountLibrary(root, ctx) {
@@ -248,9 +230,41 @@ export function mountLibrary(root, ctx) {
   sort.onchange = () => draw();
   bar.append(count, sort);
   page.appendChild(bar);
+  const dlBox = el('div', 'dl-card hidden');
+  page.insertBefore(dlBox, sbox);
   const box = el('div', 'lib-list');
   page.appendChild(box);
   root.appendChild(page);
+
+  let lastState = ctx.dl.state;
+  function drawDl() {
+    dlBox.innerHTML = '';
+    const d = ctx.dl;
+    const show = d.state === 'running' || d.state === 'cancelled' || d.state === 'error';
+    dlBox.classList.toggle('hidden', !show);
+    if (!show) return;
+    const head = el('div', 'dl-head');
+    const nm = el('div', 'lc-name', d.name.replace(/^hf\.co\//, '')); nm.title = d.name;
+    head.appendChild(nm);
+    head.appendChild(el('span', 'badge ' + (d.state === 'running' ? 'warn' : d.state === 'error' ? 'bad' : ''), d.state === 'running' ? 'Lädt …' : d.state === 'error' ? 'Fehler' : 'Abgebrochen'));
+    dlBox.appendChild(head);
+    if (d.state === 'running') { const bar = el('div', 'dl-bar'); const i = document.createElement('i'); i.style.width = (d.total ? ctx.dlPercent() : 5) + '%'; bar.appendChild(i); dlBox.appendChild(bar); }
+    dlBox.appendChild(el('div', 'note', ctx.dlText()));
+    const row = el('div', 'dlw-row');
+    if (d.state === 'running') { const b = el('button', 'btn small danger', 'Abbrechen'); b.onclick = () => ctx.dlCancel(); row.appendChild(b); }
+    else {
+      const r = el('button', 'btn small primary', 'Erneut laden'); r.onclick = () => ctx.startPull(d.name);
+      const x = el('button', 'btn small', 'Verwerfen'); x.onclick = () => ctx.dlDismiss();
+      row.append(r, x);
+    }
+    dlBox.appendChild(row);
+  }
+  const offDl = ctx.dlOn(() => {
+    drawDl();
+    if (lastState !== ctx.dl.state && ctx.dl.state === 'done') load();
+    lastState = ctx.dl.state;
+  });
+  drawDl();
 
   function draw() {
     box.innerHTML = '';
@@ -273,7 +287,8 @@ export function mountLibrary(root, ctx) {
     for (const m of list) {
       const row = el('div', 'lib-card' + (m.name === current ? ' active' : ''));
       const info = el('div', 'grow');
-      info.appendChild(el('div', 'lc-name', m.name));
+      const lname = el('div', 'lc-name', m.name.replace(/^hf\.co\//, '')); lname.title = m.name;
+      info.appendChild(lname);
       const meta = el('div', 'meta-row');
       meta.appendChild(el('span', 'badge', m.size ? formatBytes(m.size) : 'Cloud'));
       if (m.details.parameter_size) meta.appendChild(el('span', 'badge', m.details.parameter_size));
@@ -305,5 +320,5 @@ export function mountLibrary(root, ctx) {
     draw();
   }
   load();
-  return () => {};
+  return () => { offDl(); };
 }

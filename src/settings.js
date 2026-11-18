@@ -86,6 +86,8 @@ export async function openSettings(ctx, startTab = 'general') {
           nav.appendChild(b);
         }
       }
+      nav.appendChild(el('div', 'grow'));
+      nav.appendChild(ctx.dlWidget());
       const main = el('div', 'set-main');
       const bar = el('div', 'set-bar');
       const prev = el('button', 'icon-btn'); prev.innerHTML = icon('chevleft', 16); prev.title = 'Zurück'; prev.disabled = hpos <= 0;

@@ -693,6 +693,69 @@ async function pickFiles() {
 }
 
 // ---------- Seiten: Chat und Einstellungen (Erkunden und Bibliothek liegen darin) ----------
+// Download-Verwaltung: gilt für die ganze App, nicht nur für eine Seite
+const dl = { state: 'idle', name: '', status: '', completed: 0, total: 0, error: '' };
+const dlListeners = new Set();
+function dlEmit() { for (const f of [...dlListeners]) f(dl); }
+function dlOn(f) { dlListeners.add(f); return () => dlListeners.delete(f); }
+function dlPercent() { return dl.total ? Math.min(100, Math.round((dl.completed / dl.total) * 100)) : 0; }
+function dlText() {
+  if (dl.state === 'running') return dl.total ? `${dlPercent()} % · ${formatBytes(dl.completed)} / ${formatBytes(dl.total)}` : (dl.status || 'Starte …');
+  if (dl.state === 'done') return 'Fertig – in der Bibliothek';
+  if (dl.state === 'cancelled') return 'Abgebrochen – „Erneut laden“ setzt fort';
+  if (dl.state === 'error') return 'Fehler: ' + dl.error;
+  return '';
+}
+async function startPull(name) {
+  if (dl.state === 'running') return hint('Es läuft schon ein Download.');
+  Object.assign(dl, { state: 'running', name, status: 'Starte Download …', completed: 0, total: 0, error: '' });
+  dlEmit();
+  try {
+    const r = await api.ollama.pull(name);
+    dl.state = r && r.aborted ? 'cancelled' : 'done';
+    if (dl.state === 'done') { dl.completed = dl.total; await loadModels(); }
+  } catch (e) {
+    dl.state = 'error';
+    dl.error = String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  }
+  dlEmit();
+}
+function dlCancel() { api.ollama.pullCancel(); }
+function dlDismiss() { dl.state = 'idle'; dlEmit(); }
+api.ollama.onPull((p) => { if (dl.state !== 'running') return; dl.status = p.status; if (p.total) { dl.total = p.total; dl.completed = p.completed; } dlEmit(); });
+
+/** Kleine Download-Anzeige (Seitenleiste und Einstellungs-Navigation) */
+function dlWidget() {
+  const box = el('div', 'dl-widget hidden');
+  const render = () => {
+    if (!box.isConnected && box.dataset.live) { off(); return; }
+    box.dataset.live = '1';
+    box.innerHTML = '';
+    box.classList.toggle('hidden', dl.state === 'idle');
+    if (dl.state === 'idle') return;
+    const nm = el('div', 'dlw-name', dl.name.replace(/^hf\.co\//, ''));
+    nm.title = dl.name;
+    box.appendChild(nm);
+    if (dl.state === 'running') {
+      const bar = el('div', 'dl-bar'); const i = document.createElement('i'); i.style.width = (dl.total ? dlPercent() : 5) + '%'; bar.appendChild(i);
+      box.appendChild(bar);
+    }
+    box.appendChild(el('div', 'note', dlText()));
+    const row = el('div', 'dlw-row');
+    if (dl.state === 'running') { const b = el('button', 'btn small', 'Abbrechen'); b.onclick = dlCancel; row.appendChild(b); }
+    else {
+      const o = el('button', 'btn small primary', dl.state === 'done' ? 'Zur Bibliothek' : 'Erneut laden');
+      o.onclick = () => (dl.state === 'done' ? (dlDismiss(), showView('settings', 'library')) : startPull(dl.name));
+      const x = el('button', 'btn small', 'Schließen'); x.onclick = dlDismiss;
+      row.append(o, x);
+    }
+    box.appendChild(row);
+  };
+  const off = dlOn(render);
+  render();
+  return box;
+}
+
 let pageCleanup = null;
 function showView(name, tab) {
   if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; }
@@ -701,6 +764,7 @@ function showView(name, tab) {
   $('viewChat').classList.toggle('hidden', !chat);
   $('viewPage').className = 'view' + (chat ? ' hidden' : ' page-' + name);
   $('btnSettings').classList.toggle('active', !chat);
+  $('app').classList.toggle('in-settings', !chat);
   if (chat) { $('input').focus(); return; }
   showSettings(tab || 'general');
 }
@@ -708,6 +772,7 @@ function showView(name, tab) {
 function modelsCtx() {
   return {
     api, hint, renderMd,
+    dl, dlOn, dlText, dlPercent, startPull, dlCancel, dlDismiss,
     models: () => state.models, refreshModels: loadModels,
     useModel: async (n) => { $('modelSel').value = n; renderModelMenu(); await onModelChanged(true); showView('chat'); hint('Modell gewählt: ' + n); },
     goTab: (id) => showView('settings', id),
@@ -725,6 +790,7 @@ function showSettings(tab) {
     explore: (root) => { pageCleanup = mountExplore(root, modelsCtx()); },
     library: (root) => { pageCleanup = mountLibrary(root, modelsCtx()); },
     close: () => showView('chat'),
+    dlWidget,
     apply: applyAppearance,
     hint, showProgress, hideProgress,
     onSaved: async (next) => {
@@ -805,6 +871,7 @@ function updateCtxInfo() {
 }
 
 function wire() {
+  $('dlSide').appendChild(dlWidget());
   $('btnSend').onclick = send;
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);

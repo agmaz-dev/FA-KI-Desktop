@@ -297,3 +297,23 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .quant-row { grid-template-columns: 140px 80px minmax(0, 1fr) 130px; }
 .quant-table { min-width: 0; }
 .quant-row .btn { white-space: nowrap; }
+
+/* Einstellungen ersetzen das ganze Fenster (wie bei Bionic) */
+.in-settings #sidebar { display: none; }
+.in-settings #main { width: 100%; }
+/* Bibliothek: feste Spalten, lange Namen kürzen */
+.lib-card { display: grid; grid-template-columns: minmax(0, 1fr) 150px 110px; gap: 8px 12px; align-items: center; }
+.lib-card .grow { min-width: 0; }
+.lc-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+.lib-card .btn { width: 100%; white-space: nowrap; justify-content: center; text-align: center; }
+.meta-row { margin-top: 6px; }
+/* Download-Anzeige */
+.dl-bar { height: 7px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 6px 0; }
+.dl-bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.dl-card { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; background: var(--card); }
+.dl-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.dl-head .lc-name { flex: 1; min-width: 0; }
+.dlw-row { display: flex; gap: 6px; margin-top: 8px; }
+.dl-widget { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; background: var(--card); font-size: 12.5px; }
+.dlw-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-nav .dl-widget { margin: 8px 2px 0; }
