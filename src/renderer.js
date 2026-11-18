@@ -4,8 +4,9 @@ import { readPdf, prepareImage, isPdf, isImage } from './docs.js';
 import { startRecording, speak, stopSpeaking } from './audio.js';
 import { fitText, formatBytes } from '../lib/util.js';
 import { buildThink } from '../lib/think.js';
-import { $, el, icon, iconButton, applyIcons, openModal, closeModal, newId } from './ui.js';
+import { $, el, icon, iconButton, applyIcons, newId } from './ui.js';
 import { openSettings, profilePrompt } from './settings.js';
+import { mountExplore, mountLibrary } from './models.js';
 
 const api = window.api;
 
@@ -101,6 +102,32 @@ async function loadModels() {
   if (visible.some((m) => m.name === want)) sel.value = want;
   else if (visible.length) sel.value = visible[0].name;
   await onModelChanged(false);
+  renderModelMenu();
+}
+
+// ---------- Modell-Auswahl in der Eingabeleiste ----------
+function renderModelMenu() {
+  const name = $('modelSel').value;
+  $('modelBtnText').textContent = name || 'Kein Modell';
+  const f = $('modelFilter').value.trim().toLowerCase();
+  const box = $('modelList');
+  box.innerHTML = '';
+  const visible = state.models.filter((m) => (state.settings.showCloud || !m.remote) && (!f || m.name.toLowerCase().includes(f)));
+  if (!visible.length) box.appendChild(el('div', 'note menu-note', state.models.length ? 'Kein Treffer.' : 'Noch kein Modell installiert.'));
+  for (const m of visible) {
+    const b = el('button', 'model-item' + (m.name === name ? ' active' : ''));
+    b.type = 'button';
+    b.appendChild(el('span', 'mi-name', m.name + (m.remote ? ' (Cloud!)' : '')));
+    b.appendChild(el('span', 'mi-size', m.size ? formatBytes(m.size) : 'Cloud'));
+    b.onclick = async () => {
+      $('modelSel').value = m.name;
+      closeMenus();
+      renderModelMenu();
+      await onModelChanged(true);
+      updateCtxInfo();
+    };
+    box.appendChild(b);
+  }
 }
 
 async function getCaps(name) {
@@ -115,7 +142,7 @@ async function getCaps(name) {
 async function onModelChanged(save = true) {
   const name = $('modelSel').value;
   const caps = await getCaps(name);
-  $('thinkField').style.display = caps.includes('thinking') ? '' : 'none';
+  $('thinkField').classList.toggle('hidden', !caps.includes('thinking'));
   const thinkSel = $('thinkSel');
   const prev = thinkSel.value;
   thinkSel.innerHTML = '';
@@ -126,6 +153,7 @@ async function onModelChanged(save = true) {
   thinkSel.value = opts.some(([v]) => v === keep) ? keep : (three ? 'medium' : 'on');
   if (state.chat) state.chat.model = name;
   if (save && name) state.settings = await api.settings.set({ model: name });
+  $('modelBtnText').textContent = name || 'Kein Modell';
 }
 
 // ---------- Profile ----------
@@ -226,6 +254,7 @@ async function openChat(id) {
 
 // ---------- Nachrichten anzeigen ----------
 function renderAll() {
+  updateCtxInfo();
   const box = $('messages');
   box.innerHTML = '';
   updateTitle();
@@ -376,7 +405,7 @@ async function send() {
   const text = $('input').value.trim();
   if (!text && !state.pending.length) return;
   const model = $('modelSel').value;
-  if (!model) return hint('Bitte zuerst ein Modell installieren (links unten „Modelle verwalten“).');
+  if (!model) { hint('Bitte zuerst ein Modell laden: links „Erkunden“.'); return showView('explore'); }
   if (!(await refreshStatus())) return;
   stopAllSpeech();
   if (!state.chat) state.chat = newChat();
@@ -442,8 +471,8 @@ async function runAssistant() {
     keep_alive: ka === '-1' ? -1 : ka,
   };
   if (think !== undefined) body.think = think;
-  const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false);
-  api.chat.start({ id, body, useTools });
+  const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false || state.settings.agentTools !== false);
+  api.chat.start({ id, chatId: state.chat.id, body, useTools });
   api.chats.save(state.chat);
 }
 
@@ -494,6 +523,7 @@ async function finishStream(id, extra) {
   if (!s.asst.content && !s.asst.thinking && !s.asst.error) s.asst.content = '_(keine Antwort erhalten)_';
   state.chat.updated = Date.now();
   fillMsg(s.wrap, s.asst, false, true);
+  updateCtxInfo();
   await api.chats.save(state.chat);
   await refreshChats();
   if ((state.settings.ttsAuto || state.conv) && s.asst.content && !s.asst.error && !(extra && extra.aborted)) await speakNow(s.asst.content);
@@ -527,8 +557,8 @@ function stopAllSpeech() {
 function renderTtsButton() {
   const b = $('btnTts');
   b.classList.toggle('on', !!state.settings.ttsAuto);
-  b.innerHTML = icon(state.settings.ttsAuto ? 'speaker' : 'speakerOff');
-  b.title = state.settings.ttsAuto ? 'Antworten werden automatisch vorgelesen (Klick zum Ausschalten)' : 'Antworten automatisch vorlesen';
+  b.querySelector('[data-icon]').innerHTML = icon(state.settings.ttsAuto ? 'speaker' : 'speakerOff', 16);
+  $('ttsLabel').textContent = state.settings.ttsAuto ? 'Automatisches Vorlesen ist an (Klick: aus)' : 'Antworten automatisch vorlesen';
 }
 
 // ---------- Mikrofon ----------
@@ -662,78 +692,44 @@ async function pickFiles() {
   for (const f of await api.files.pick()) await addFile(f.name, f.data);
 }
 
-// ---------- Modelle-Dialog ----------
-async function openModels() {
-  const render = async (m) => {
-    m.innerHTML = '';
-    m.appendChild(el('h2', null, 'Modelle verwalten'));
-    let list = [];
-    try { list = await api.ollama.models(); } catch { m.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); }
-    m.appendChild(el('h3', null, 'Installiert'));
-    if (!list.length) m.appendChild(el('div', 'note', 'Noch keine Modelle installiert.'));
-    for (const x of list) {
-      const r = el('div', 'list-row');
-      const g = el('div', 'grow'); g.appendChild(el('div', null, x.name));
-      g.appendChild(el('div', 'sub', (x.size ? formatBytes(x.size) : 'Cloud') + (x.details.parameter_size ? ' · ' + x.details.parameter_size : '')));
-      r.appendChild(g);
-      if (x.remote) r.appendChild(el('span', 'badge warn', 'Cloud – nicht lokal'));
-      const d = el('button', 'btn small danger', 'Löschen');
-      d.onclick = async () => {
-        if (!confirm(`Modell „${x.name}“ löschen?`)) return;
-        await api.ollama.remove(x.name); await loadModels(); render(m);
-      };
-      r.appendChild(d);
-      m.appendChild(r);
-    }
-    m.appendChild(el('h3', null, 'Neues Modell laden'));
-    const inl = el('div', 'inline');
-    const inp = el('input'); inp.type = 'text'; inp.placeholder = 'z. B. gpt-oss:20b';
-    const go = el('button', 'btn primary', 'Laden');
-    inl.append(inp, go);
-    m.appendChild(inl);
-    const sugg = el('div', 'chips-row');
-    for (const s of ['gpt-oss:20b', 'gemma4:12b']) {
-      const c = el('button', 'btn small', s); c.onclick = () => { inp.value = s; }; sugg.appendChild(c);
-    }
-    m.appendChild(sugg);
-    const prog = el('div', 'note', ''); prog.style.marginTop = '10px';
-    m.appendChild(prog);
-    if (m._offPull) m._offPull(); // beim Neuaufbau alten Listener entfernen
-    const off = api.ollama.onPull((p) => {
-      prog.textContent = p.total ? `${p.name}: ${p.status} – ${Math.round((p.completed / p.total) * 100)} % (${formatBytes(p.completed)} / ${formatBytes(p.total)})` : `${p.name}: ${p.status}`;
-    });
-    m._offPull = off;
-    go.onclick = async () => {
-      const name = inp.value.trim();
-      if (!name) return;
-      if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
-      go.disabled = true; go.textContent = 'Lädt …';
-      try {
-        const r = await api.ollama.pull(name);
-        if (r && r.aborted) { prog.textContent = 'Download abgebrochen.'; go.disabled = false; go.textContent = 'Laden'; return; }
-        await loadModels(); render(m);
-      } catch (e) { prog.textContent = 'Fehler: ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); go.disabled = false; go.textContent = 'Laden'; }
-    };
-    const act = el('div', 'actions');
-    const stop = el('button', 'btn', 'Download abbrechen'); stop.onclick = () => api.ollama.pullCancel();
-    const close = el('button', 'btn primary', 'Schließen'); close.onclick = () => { off(); m._offPull = null; closeModal(); };
-    act.append(stop, close);
-    m.appendChild(act);
+// ---------- Seiten: Chat, Erkunden, Bibliothek, Einstellungen ----------
+let pageCleanup = null;
+function showView(name, tab) {
+  if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; }
+  closeMenus();
+  const page = $('viewPage');
+  const chat = name === 'chat';
+  $('viewChat').classList.toggle('hidden', !chat);
+  page.classList.toggle('hidden', chat);
+  page.className = 'view' + (chat ? ' hidden' : ' page-' + name);
+  for (const [id, v] of [['navExplore', 'explore'], ['navLibrary', 'library'], ['btnSettings', 'settings']]) $(id).classList.toggle('active', name === v);
+  if (chat) { $('input').focus(); return; }
+  const common = {
+    api, back: () => showView('chat'), hint, renderMd,
+    models: () => state.models, refreshModels: loadModels,
+    useModel: async (n) => { $('modelSel').value = n; renderModelMenu(); await onModelChanged(true); showView('chat'); hint('Modell gewählt: ' + n); },
+    goExplore: () => showView('explore'),
+    currentModel: () => $('modelSel').value,
   };
-  openModal(render);
+  if (name === 'explore') pageCleanup = mountExplore(page, common);
+  else if (name === 'library') pageCleanup = mountLibrary(page, common);
+  else if (name === 'settings') showSettings(tab || 'general');
 }
 
 // ---------- Einstellungen ----------
 function showSettings(tab) {
+  const page = $('viewPage');
   openSettings({
     get settings() { return state.settings; },
     api,
+    mount: (build) => { page.innerHTML = ''; const wrap = el('div', 'settings-page'); page.appendChild(wrap); build(wrap); },
+    close: () => showView('chat'),
     apply: applyAppearance,
     hint, showProgress, hideProgress,
     onSaved: async (next) => {
       state.settings = next;
       applyAppearance(next);
-      renderProfileSelect(); renderGreeting(); renderTtsButton();
+      renderProfileSelect(); renderGreeting(); renderTtsButton(); updateCtxInfo();
       await refreshStatus(); await loadModels();
     },
     speakSample: (text, draft) => speakNow(text, draft),
@@ -771,25 +767,56 @@ function toggleSidebar(open) {
 }
 
 function buildTemplateMenu() {
-  const menu = $('tplMenu');
-  menu.innerHTML = '';
-  menu.appendChild(el('div', 'menu-h', 'E-Mail- und Schreibhilfe'));
+  const list = $('tplList');
+  list.innerHTML = '';
   for (const [, label, prompt] of TEMPLATES) {
     const b = el('button', null, label);
+    b.type = 'button';
     b.onclick = () => {
       $('input').value = prompt + $('input').value;
-      autosize(); $('input').focus(); menu.classList.add('hidden');
+      autosize(); $('input').focus(); closeMenus();
     };
-    menu.appendChild(b);
+    list.appendChild(b);
   }
+}
+
+function closeMenus() {
+  for (const id of ['plusMenu', 'modelMenu']) $(id).classList.add('hidden');
+}
+function toggleMenu(id) {
+  const m = $(id);
+  const open = m.classList.contains('hidden');
+  closeMenus();
+  if (open) { m.classList.remove('hidden'); if (id === 'modelMenu') { $('modelFilter').value = ''; renderModelMenu(); $('modelFilter').focus(); } }
+}
+
+/** Kontext-Zähler unter dem Eingabefeld: so viele Tokens hat der Chat zuletzt gebraucht. */
+function updateCtxInfo() {
+  const msgs = (state.chat && state.chat.messages) || [];
+  let used = 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const st = msgs[i].stats;
+    if (msgs[i].role === 'assistant' && st && st.promptCount) { used = st.promptCount + (st.evalCount || 0); break; }
+  }
+  const max = state.settings.numCtx;
+  $('ctxInfo').textContent = used ? `Kontext: ${used.toLocaleString('de-DE')} von ${max.toLocaleString('de-DE')}` : '';
+  $('ctxInfo').classList.toggle('full', used > max * 0.85);
 }
 
 function wire() {
   $('btnSend').onclick = send;
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);
-  $('btnSettings').onclick = () => showSettings('general');
-  $('btnModels').onclick = openModels;
+  $('btnSettings').onclick = () => showView('settings');
+  $('navExplore').onclick = () => showView('explore');
+  $('navLibrary').onclick = () => showView('library');
+  $('btnPlus').onclick = (e) => { e.stopPropagation(); toggleMenu('plusMenu'); };
+  $('modelBtn').onclick = (e) => { e.stopPropagation(); toggleMenu('modelMenu'); };
+  $('modelFilter').addEventListener('input', renderModelMenu);
+  $('modelMore').onclick = () => showView('explore');
+  for (const id of ['plusMenu', 'modelMenu']) $(id).addEventListener('click', (e) => { if (e.target.closest('select,input')) e.stopPropagation(); });
+  $('btnAttach').addEventListener('click', closeMenus);
+  $('btnConv').addEventListener('click', closeMenus);
   $('btnAttach').onclick = pickFiles;
   $('btnMic').onclick = toggleMic;
   $('btnConv').onclick = toggleConv;
@@ -803,9 +830,7 @@ function wire() {
     renderTtsButton();
     if (!state.settings.ttsAuto) stopAllSpeech();
   };
-  $('btnTpl').onclick = (e) => { e.stopPropagation(); $('tplMenu').classList.toggle('hidden'); };
-  document.addEventListener('click', () => $('tplMenu').classList.add('hidden'));
-  $('modelSel').onchange = () => onModelChanged(true);
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
   $('thinkSel').onchange = async () => { state.settings = await api.settings.set({ think: $('thinkSel').value }); };
   $('profileSel').onchange = async () => {
     state.settings = await api.settings.set({ activeProfile: $('profileSel').value });
@@ -834,13 +859,11 @@ function wire() {
       }
     }
   });
-  $('overlay').addEventListener('mousedown', (e) => {
-    if (e.target === $('overlay') && !$('modal').classList.contains('wide')) closeModal();
-  });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('overlay').classList.contains('hidden')) closeModal();
-      else if (state.speaking) stopAllSpeech();
+      if (!$('plusMenu').classList.contains('hidden') || !$('modelMenu').classList.contains('hidden')) closeMenus();
+      else if (!$('viewChat').classList.contains('hidden')) { if (state.speaking) stopAllSpeech(); }
+      else showView('chat');
     }
   });
 }

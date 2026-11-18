@@ -1,8 +1,9 @@
-import { el, $, icon, openModal, closeModal, formRow, selectOf, input, textarea, switchRow, newId } from './ui.js';
+import { el, $, icon, formRow, selectOf, input, textarea, switchRow, newId } from './ui.js';
 
 const TABS = [
   ['general', 'Allgemein', 'sliders'],
   ['ai', 'KI und Modell', 'cpu'],
+  ['tools', 'Internet und Agent', 'globe'],
   ['profiles', 'Profile', 'user'],
   ['speech', 'Sprache', 'speaker'],
   ['data', 'Daten und Info', 'download'],
@@ -41,7 +42,7 @@ export function profilePrompt(p) {
 }
 
 /**
- * ctx: { settings, api, apply(draft), hint, showProgress, hideProgress, onSaved(settings), speakSample(text, draft), onChatsCleared() }
+ * ctx: { settings, api, mount(build), close(), apply(draft), hint, showProgress, hideProgress, onSaved(settings), speakSample(text, draft), onChatsCleared() }
  */
 export async function openSettings(ctx, startTab = 'general') {
   const draft = JSON.parse(JSON.stringify(ctx.settings));
@@ -66,8 +67,12 @@ export async function openSettings(ctx, startTab = 'general') {
   async function render() {
     const st = await api.speech.status();
     vstat = await api.voice.status();
-    openModal((m) => {
+    ctx.mount((m) => {
       const nav = el('div', 'set-nav');
+      const back = el('button', 'back-btn');
+      back.innerHTML = icon('arrowleft', 17) + '<span>Zurück zur App</span>';
+      back.onclick = () => { ctx.apply(ctx.settings); ctx.close(); };
+      nav.appendChild(back);
       nav.appendChild(el('h2', null, 'Einstellungen'));
       for (const [id, label, ic] of TABS) {
         const b = el('button', id === tab ? 'active' : '');
@@ -80,8 +85,8 @@ export async function openSettings(ctx, startTab = 'general') {
       main.appendChild(body);
       const foot = el('div', 'set-foot');
       const saved = el('span', 'msg-saved', '');
-      const cancel = el('button', 'btn', 'Schließen');
-      cancel.onclick = () => { ctx.apply(ctx.settings); closeModal(); };
+      const cancel = el('button', 'btn', 'Zurück zur App');
+      cancel.onclick = () => { ctx.apply(ctx.settings); ctx.close(); };
       const save = el('button', 'btn primary', 'Speichern');
       save.onclick = async () => {
         draft.numCtx = Math.max(2048, parseInt(draft.numCtx, 10) || 16384);
@@ -96,8 +101,8 @@ export async function openSettings(ctx, startTab = 'general') {
       main.appendChild(foot);
       m.append(nav, main);
 
-      ({ general, ai, profiles, speech, data })[tab](body, st);
-    }, { wide: true });
+      ({ general, ai, tools, profiles, speech, data })[tab](body, st);
+    });
   }
 
   const bind = (control, key, conv = (v) => v) => {
@@ -151,16 +156,53 @@ export async function openSettings(ctx, startTab = 'general') {
     body.appendChild(formRow('Modell im Speicher halten', bind(selectOf([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive), 'keepAlive'), 'Solange bleibt das Modell geladen, damit die nächste Antwort sofort kommt.'));
     body.appendChild(formRow('Standard-Denktiefe', bind(selectOf([['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], draft.think), 'think'), 'Bei gpt-oss. Du kannst sie im Chat jederzeit ändern.'));
 
-    body.appendChild(el('h3', null, 'Internet und GitHub'));
+    body.appendChild(el('h3', null, 'Dein PC (für „Erkunden“)'));
     body.lastChild.style.margin = '22px 0 8px';
+    const hw = el('div', 'two');
+    hw.appendChild(formRow('Grafikspeicher (GB)', bind(input('number', draft.vramGb, { min: 2, max: 256, step: 1 }), 'vramGb', (v) => Math.max(2, parseInt(v, 10) || 16)), 'Damit „Erkunden“ zeigt, was ganz auf die Karte passt. RX 7800 XT: 16.'));
+    hw.appendChild(formRow('Arbeitsspeicher (GB)', bind(input('number', draft.ramGb, { min: 4, max: 1024, step: 1 }), 'ramGb', (v) => Math.max(4, parseInt(v, 10) || 32)), 'Für Modelle, die nur teilweise auf die Karte passen.'));
+    body.appendChild(hw);
+  }
+
+  // ---------- Internet und Agent ----------
+  function tools(body) {
+    body.appendChild(el('h2', null, 'Internet und Agent'));
     const wt = switchRow('Internetsuche und Seiten lesen', 'Die KI darf im Web suchen, Seiten lesen und Shop-Links (eBay, Kleinanzeigen …) bauen. Ohne Konto und ohne Schlüssel; die Anfragen gehen direkt von Deinem PC raus. Nur bei Modellen mit Werkzeug-Unterstützung (z. B. gpt-oss, Qwen).', draft.webTools);
     bind(wt.cb, 'webTools');
     body.appendChild(wt.row);
-    const gt = switchRow('GitHub lesen', 'Die KI darf Deine Repos und Dateien auf GitHub lesen. Sie kann nichts ändern oder löschen.', draft.githubTools);
+    const gt = switchRow('GitHub lesen', 'Die KI darf Deine Repos, Dateien und Builds auf GitHub lesen.', draft.githubTools);
     bind(gt.cb, 'githubTools');
     body.appendChild(gt.row);
+    const at = switchRow('Agent: Dateien, Befehle, Git und GitHub schreiben', 'Die KI arbeitet wie ein Programmierer: Dateien im Arbeitsordner lesen und ändern, Befehle und Tests ausführen, mit Git und GitHub arbeiten (Repos, Dateien, Branches, Pull Requests, Issues). Jede Änderung und jeder Befehl wird Dir vorher gezeigt und läuft nur nach Deinem „Erlauben“. Kein Löschen von Repos.', draft.agentTools);
+    bind(at.cb, 'agentTools');
+    body.appendChild(at.row);
+
+    body.appendChild(el('h3', null, 'Arbeitsordner'));
+    body.lastChild.style.margin = '22px 0 8px';
+    const dirNote = el('div', null, draft.agentDir || 'Noch kein Ordner gewählt.');
+    dirNote.style.cssText = 'font-family:Consolas,monospace;font-size:13.5px;word-break:break-all;margin-bottom:6px';
+    body.appendChild(dirNote);
+    body.appendChild(el('div', 'note', 'Nur in diesem Ordner darf die KI Dateien lesen, schreiben und Befehle ausführen. Wähle den Ordner Deines Projekts (oder einen leeren für ein neues).'));
+    const dr = el('div'); dr.style.cssText = 'display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap';
+    const pick = el('button', 'btn small', draft.agentDir ? 'Anderen Ordner wählen …' : 'Ordner wählen …');
+    pick.onclick = async () => { const n = await api.agent.pickDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); };
+    dr.appendChild(pick);
+    if (draft.agentDir) {
+      const op = el('button', 'btn small', 'Ordner öffnen'); op.onclick = () => api.agent.openDir();
+      const cl = el('button', 'btn small', 'Ordner entfernen'); cl.onclick = async () => { const n = await api.agent.clearDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); };
+      dr.append(op, cl);
+    }
+    body.appendChild(dr);
+    const chk = el('div', 'note', 'Prüfe Git und Node …');
+    body.appendChild(chk);
+    api.agent.check().then((r) => {
+      chk.textContent = (r.git ? 'Git gefunden: ' + r.git : 'Git nicht gefunden – für die Git-Werkzeuge bitte „Git für Windows“ von git-scm.com installieren.') + '   ' + (r.node ? 'Node gefunden: ' + r.node : 'Node nicht gefunden (nur nötig, wenn die KI JavaScript-Projekte ausführen soll).');
+    }).catch(() => { chk.textContent = ''; });
+
+    body.appendChild(el('h3', null, 'GitHub-Zugang'));
+    body.lastChild.style.margin = '22px 0 8px';
     const tok = input('password', '', { placeholder: draft.githubHasToken ? 'Token ist gespeichert (zum Ersetzen neuen eintragen)' : 'GitHub-Token einfügen', autocomplete: 'off' });
-    body.appendChild(formRow('GitHub-Token', tok, 'Auf github.com unter Settings → Developer settings → Personal access tokens erzeugen, nur mit Leserechten (Contents: Read-only). Er wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben. Für öffentliche Repos brauchst Du keinen.'));
+    body.appendChild(formRow('GitHub-Token', tok, 'Auf github.com unter Settings → Developer settings → Personal access tokens erzeugen. Zum Lesen reicht „Contents: Read-only“. Damit die KI auch schreiben darf (Repos anlegen, pushen, Pull Requests): klassisch Haken „repo“ und „workflow“, oder fein „Contents“, „Pull requests“, „Issues“, „Actions“ auf „Read and write“ und „Administration“ zum Anlegen von Repos. Der Token wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben. Für öffentliche Repos zum Lesen brauchst Du keinen.'));
     const tstat = el('div', 'note', draft.githubHasToken ? 'Ein Token ist gespeichert.' : 'Kein Token gespeichert.');
     const row = el('div');
     row.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';

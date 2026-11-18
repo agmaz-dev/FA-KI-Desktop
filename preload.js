@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   files: { pick: inv('files:pick') },
   github: { setToken: inv('github:setToken'), test: inv('github:test') },
+  agent: { pickDir: inv('agent:pickDir'), clearDir: inv('agent:clearDir'), check: inv('agent:check'), openDir: inv('agent:openDir') },
+  hf: { search: inv('hf:search'), details: inv('hf:details') },
   ollama: {
     ensure: inv('ollama:ensure'), status: inv('ollama:status'), models: inv('ollama:models'), show: inv('ollama:show'),
     remove: inv('ollama:delete'), pull: inv('ollama:pull'), pullCancel: inv('ollama:pullCancel'),

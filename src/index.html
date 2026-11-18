@@ -14,61 +14,77 @@
       <button id="btnSidebar" class="icon-btn" data-icon="sidebar" title="Seitenleiste ausblenden"></button>
     </div>
     <button id="newChat" class="nav-btn accent-text"><span data-icon="plus"></span>Neuer Chat</button>
+    <button id="navExplore" class="nav-btn"><span data-icon="compass"></span>Erkunden</button>
+    <button id="navLibrary" class="nav-btn"><span data-icon="library"></span>Bibliothek</button>
     <div class="search"><span data-icon="search" data-size="15"></span><input id="chatSearch" type="text" placeholder="Chats durchsuchen"></div>
     <div id="chatList" class="chat-list"></div>
     <div class="side-foot">
-      <button id="btnModels" class="nav-btn"><span data-icon="cpu"></span>Modelle verwalten</button>
-      <button id="btnSettings" class="nav-btn"><span data-icon="sliders"></span>Einstellungen</button>
       <div id="status" class="status"><span class="dot"></span><span id="statusText">Verbinde …</span></div>
+      <button id="btnSettings" class="nav-btn"><span data-icon="gear"></span>Einstellungen</button>
     </div>
   </aside>
 
   <main id="main">
-    <header id="topbar">
-      <button id="btnSidebarOpen" class="icon-btn hidden" data-icon="sidebar" title="Seitenleiste einblenden"></button>
-      <div id="chatTitle" class="chat-title"></div>
-      <div class="spacer"></div>
-      <button id="btnStopSpeak" class="pill hidden"><span data-icon="stop" data-size="14"></span>Vorlesen stoppen</button>
-      <button id="btnExport" class="icon-btn" data-icon="download" title="Chat exportieren"></button>
-    </header>
+    <section id="viewChat" class="view">
+      <header id="topbar">
+        <button id="btnSidebarOpen" class="icon-btn hidden" data-icon="sidebar" title="Seitenleiste einblenden"></button>
+        <div id="chatTitle" class="chat-title"></div>
+        <div class="spacer"></div>
+        <button id="btnStopSpeak" class="pill hidden"><span data-icon="stop" data-size="14"></span>Vorlesen stoppen</button>
+        <button id="btnExport" class="icon-btn" data-icon="download" title="Chat exportieren"></button>
+      </header>
 
-    <div id="messages" class="messages">
-      <div id="empty" class="empty">
-        <div class="logo big">FA</div>
-        <h1 id="greeting">Deine private KI</h1>
-        <p>Alles läuft lokal auf diesem PC. Deine Chats und Dateien verlassen den Rechner nicht.</p>
-      </div>
-    </div>
-
-    <div id="progressBar" class="progress hidden"><div class="progress-text" id="progressText"></div><div class="bar"><div id="progressFill"></div></div></div>
-
-    <div id="composerWrap">
-      <div id="composer" class="card">
-        <div id="attachments" class="attachments"></div>
-        <textarea id="input" rows="1" placeholder="Wie kann ich helfen?"></textarea>
-        <div class="toolbar">
-          <button id="btnAttach" class="icon-btn" data-icon="paperclip" title="PDF, Bild oder Textdatei anhängen"></button>
-          <div class="menu-wrap">
-            <button id="btnTpl" class="icon-btn" data-icon="mail" title="E-Mail-Hilfe"></button>
-            <div id="tplMenu" class="menu hidden"></div>
-          </div>
-          <select id="profileSel" class="mini" title="Profil (Absenderangaben für Briefe und E-Mails)"></select>
-          <div class="spacer"></div>
-          <select id="modelSel" class="mini" title="Modell"></select>
-          <div class="field-inline" id="thinkField"><select id="thinkSel" class="mini" title="Denktiefe"></select></div>
-          <button id="btnTts" class="icon-btn" data-icon="speaker" title="Antworten automatisch vorlesen"></button>
-          <button id="btnMic" class="icon-btn" data-icon="mic" title="Diktieren (Klick zum Starten/Beenden)"></button>
-          <button id="btnConv" class="icon-btn" data-icon="wave" title="Gesprächsmodus: sprechen, Antwort wird vorgelesen, dann hört die KI wieder zu"></button>
-          <button id="btnSend" class="send" data-icon="up" title="Senden"></button>
-          <button id="btnStop" class="send stop hidden" data-icon="stop" title="Antwort stoppen"></button>
+      <div id="messages" class="messages">
+        <div id="empty" class="empty">
+          <div class="logo big">FA</div>
+          <h1 id="greeting">Deine private KI</h1>
+          <p>Alles läuft lokal auf diesem PC. Deine Chats und Dateien verlassen den Rechner nicht.</p>
         </div>
       </div>
-      <div id="hint" class="hint"></div>
-    </div>
+
+      <div id="progressBar" class="progress hidden"><div class="progress-text" id="progressText"></div><div class="bar"><div id="progressFill"></div></div></div>
+
+      <div id="composerWrap">
+        <div id="composer" class="card">
+          <div id="attachments" class="attachments"></div>
+          <textarea id="input" rows="1" placeholder="Wie kann ich helfen?"></textarea>
+          <div class="toolbar">
+            <div class="menu-wrap">
+              <button id="btnPlus" class="round-btn" data-icon="plus" title="Anhängen, Schreibhilfen, Profil und mehr"></button>
+              <div id="plusMenu" class="menu up hidden">
+                <button id="btnAttach" type="button"><span data-icon="paperclip" data-size="16"></span>Datei anhängen (PDF, Bild, Text)</button>
+                <button id="btnTts" type="button"><span data-icon="speaker" data-size="16"></span><span id="ttsLabel">Antworten automatisch vorlesen</span></button>
+                <button id="btnConv" type="button"><span data-icon="wave" data-size="16"></span>Gesprächsmodus (sprechen und zuhören)</button>
+                <div class="menu-h">Profil für Briefe und E-Mails</div>
+                <div class="menu-field"><select id="profileSel" title="Profil (Absenderangaben)"></select></div>
+                <div class="menu-field hidden" id="thinkField"><select id="thinkSel" title="Denktiefe"></select></div>
+                <div class="menu-h">E-Mail- und Schreibhilfe</div>
+                <div id="tplList"></div>
+              </div>
+            </div>
+            <div class="spacer"></div>
+            <div class="menu-wrap">
+              <button id="modelBtn" class="model-btn" type="button" title="Modell wählen"><span id="modelBtnText">Kein Modell</span><span data-icon="chevron" data-size="14"></span></button>
+              <div id="modelMenu" class="menu up right model-menu hidden">
+                <input id="modelFilter" type="text" placeholder="Modelle filtern">
+                <div id="modelList"></div>
+                <button id="modelMore" type="button" class="menu-link">Weitere Modelle in „Erkunden“ …</button>
+              </div>
+              <select id="modelSel" class="hidden" aria-hidden="true"></select>
+            </div>
+            <button id="btnMic" class="icon-btn" data-icon="mic" title="Diktieren (Klick zum Starten/Beenden)"></button>
+            <button id="btnSend" class="send" data-icon="up" title="Senden"></button>
+            <button id="btnStop" class="send stop hidden" data-icon="stop" title="Antwort stoppen"></button>
+          </div>
+        </div>
+        <div class="ctx-line"><span id="ctxInfo"></span><span id="hint" class="hint"></span></div>
+      </div>
+    </section>
+
+    <section id="viewPage" class="view hidden"></section>
   </main>
 </div>
 
-<div id="overlay" class="overlay hidden"><div class="modal" id="modal"></div></div>
 <script src="renderer.js"></script>
 </body>
 </html>

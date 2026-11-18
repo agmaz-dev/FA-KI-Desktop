@@ -12,6 +12,8 @@ const { VoiceInstaller } = require('./lib/voiceinstall');
 const { Supertonic } = require('./lib/supertonic');
 const tools = require('./lib/tools');
 const github = require('./lib/github');
+const agent = require('./lib/agent');
+const hf = require('./lib/hf');
 
 let win = null;
 let store = null;
@@ -131,7 +133,7 @@ if (!gotLock) {
 const base = () => store.getSettings().ollamaUrl;
 
 // Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
-const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc']);
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc', 'agentDir']);
 
 // GitHub-Token: verschlüsselt (Windows-Anmeldedaten) im Hauptprozess; die Oberfläche sieht ihn nie.
 function getGithubToken() {
@@ -148,6 +150,26 @@ function setGithubToken(token) {
   if (token) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(token).toString('base64') : 'raw:' + token;
   store.setSettings({ githubTokenEnc: enc });
 }
+// Bestätigungen für Agent-Aktionen. „Immer erlauben“ gilt nur je Chat und Art, nie für Löschen und Zusammenführen.
+const autoAllow = new Map();
+const NEVER_AUTO = new Set(['datei-loeschen', 'github-merge']);
+async function confirmAction(chatId, req) {
+  const set = autoAllow.get(chatId) || new Set();
+  const canAuto = !NEVER_AUTO.has(req.kategorie);
+  if (canAuto && set.has(req.kategorie)) return true;
+  if (!win || win.isDestroyed()) return false;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  const r = await dialog.showMessageBox(win, {
+    type: 'question', buttons: ['Erlauben', 'Ablehnen'], defaultId: 1, cancelId: 1, noLink: true,
+    title: 'FA KI Desktop – Bestätigung', message: req.titel, detail: req.detail || '',
+    ...(canAuto ? { checkboxLabel: 'Weitere Aktionen dieser Art in diesem Chat ohne Nachfrage erlauben', checkboxChecked: false } : {}),
+  });
+  if (r.response !== 0) return false;
+  if (canAuto && r.checkboxChecked) { set.add(req.kategorie); autoAllow.set(chatId, set); }
+  return true;
+}
+
 /** Einstellungen für die Oberfläche: ohne Token, mit Hinweis, ob einer da ist. */
 function publicSettings(s) {
   const { githubTokenEnc, ...rest } = s;
@@ -183,6 +205,16 @@ function registerIpc() {
     if (!t) return { ok: false, error: 'Kein Token gespeichert' };
     try { return { ok: true, login: await github.whoami(t) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
   });
+  ipcMain.handle('agent:pickDir', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Arbeitsordner für die KI wählen', properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return publicSettings(store.getSettings());
+    return publicSettings(store.setSettings({ agentDir: r.filePaths[0] }));
+  });
+  ipcMain.handle('agent:clearDir', () => publicSettings(store.setSettings({ agentDir: '' })));
+  ipcMain.handle('agent:check', () => agent.checkTools());
+  ipcMain.handle('agent:openDir', () => { const d = store.getSettings().agentDir; return d ? shell.openPath(d) : ''; });
+  ipcMain.handle('hf:search', (_e, { query, sort }) => hf.search(query, { sort }));
+  ipcMain.handle('hf:details', (_e, id) => hf.details(id, { vramGb: store.getSettings().vramGb, ramGb: store.getSettings().ramGb }));
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
@@ -251,6 +283,7 @@ function registerIpc() {
   });
   ipcMain.handle('ollama:delete', (_e, name) => ollama.deleteModel(base(), name));
   ipcMain.handle('ollama:pull', async (_e, name) => {
+    if (!hf.okPullName(name)) throw new Error('Ungültiger Modellname.');
     if (pullController) throw new Error('Es läuft schon ein Download.');
     pullController = new AbortController();
     try {
@@ -269,7 +302,7 @@ function registerIpc() {
   });
   ipcMain.handle('ollama:pullCancel', () => { if (pullController) pullController.abort(); return true; });
 
-  ipcMain.handle('chat:start', async (_e, { id, body, useTools }) => {
+  ipcMain.handle('chat:start', async (_e, { id, chatId, body, useTools }) => {
     const ctrl = new AbortController();
     chatControllers.set(id, ctrl);
     let stats = null;
@@ -277,13 +310,14 @@ function registerIpc() {
       const onObj = (o) => {
         const m = o.message || {};
         if (m.content || m.thinking) send('chat:delta', { id, content: m.content || '', thinking: m.thinking || '' });
-        if (o.done) stats = { evalCount: o.eval_count, evalDuration: o.eval_duration, doneReason: o.done_reason };
+        if (o.done) stats = { evalCount: o.eval_count, evalDuration: o.eval_duration, doneReason: o.done_reason, promptCount: o.prompt_eval_count };
       };
       const toolList = useTools ? tools.toolsFor(store.getSettings()) : [];
       if (toolList.length) {
         await tools.chatWithTools({
           chatStream: (b, cb, sig) => ollama.chatStream(base(), b, cb, sig),
-          body, tools: toolList, ctx: { getToken: getGithubToken }, signal: ctrl.signal, onObj,
+          body, tools: toolList, signal: ctrl.signal, onObj,
+          ctx: { getToken: getGithubToken, agentDir: store.getSettings().agentDir, confirm: (req) => confirmAction(String(chatId || id), req) },
           onTool: ({ label }) => send('chat:tool', { id, label }),
         });
       } else {

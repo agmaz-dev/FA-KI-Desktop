@@ -124,3 +124,24 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - `__pycache__` ist aus dem Repo und dem Installationsprogramm entfernt; adm-zip auf 0.6.1 (keine bekannten Lücken mehr).
 - Piper-Stimmen werden beim Start nur noch nachgeladen, wenn Piper auch als Stimme genutzt wird.
 - Build: whisper.cpp ist auf v1.9.5 angepinnt, `whisper-server.exe` wird mitgeliefert (der Build prüft das), ein vorhandenes Release wird nicht mehr überschrieben, der Workflow prüft auch Pull Requests und hat ein Zeitlimit von 45 Minuten.
+
+## Neu in 1.10.0 – Agent, Erkunden, Bibliothek und neue Oberfläche
+
+**Agent (arbeitet wie ein Programmierer)**
+- Die KI kann im **Arbeitsordner** Dateien lesen, anlegen, ändern und löschen, **Befehle** ausführen (Tests, Build, Skripte) und **Git** benutzen (status, add, commit, branch, push, pull, clone …).
+- Auf **GitHub** kann sie Repos anlegen (standardmäßig privat), Dateien schreiben, Branches und Pull Requests erstellen, Pull Requests zusammenführen, Issues anlegen sowie Pull Requests und Actions-Läufe lesen. Das Löschen von Repos und das Ändern von Repo-Einstellungen gibt es bewusst nicht.
+- **Jede Änderung und jeder Befehl wird vorher gezeigt** und läuft nur nach „Erlauben“. Im Dialog kann man für diesen Chat weitere Aktionen derselben Art freigeben; Löschen und Zusammenführen fragen immer.
+- Sicherheit: Dateiwerkzeuge bleiben im Arbeitsordner (auch gegen `..` und Verknüpfungen), nie in `.git`; Git spricht nur mit https://github.com/ und kennt keine Konfigurations- oder Ausführ-Optionen; der Token wird nur bei Netzwerk-Befehlen an GitHub mitgegeben, nie an die KI und wird aus Ausgaben entfernt; Texte aus Dateien, Befehlen und Webseiten gelten als Daten, nicht als Anweisungen.
+- Lange Arbeitsläufe (bis 30 Werkzeug-Runden): alte Ergebnisse werden gekürzt, damit sie in den Kontext passen.
+- Einstellungen → **Internet und Agent**: Schalter, Arbeitsordner wählen, Prüfung ob Git und Node gefunden werden, GitHub-Token (zum Schreiben mit Schreibrechten).
+
+**Erkunden und Bibliothek (wie bei LM Studio)**
+- **Erkunden:** Modelle auf Hugging Face suchen (GGUF, sortiert nach Beliebtheit, Trend, Likes, Datum), Details mit Beschreibung, allen Stufen (Q4, Q6, Q8 …) mit Größe, **„Passt auf Deine Karte“** (Grafikspeicher und Arbeitsspeicher einstellbar), Empfehlung und Download über Ollama. Bilder/Werkzeuge/Denken sind nur aus Schlagworten geschätzt.
+- **Bibliothek:** installierte Modelle mit Größe, Parametern, Bit-Stufe und Fähigkeiten; „Im Chat verwenden“ und „Löschen“.
+
+**Oberfläche im Stil von Bionic**
+- Rundes Eingabefeld: „+“ links (Datei, Vorlesen, Gesprächsmodus, Profil, Denktiefe, Schreibhilfen), Modell-Auswahl mit Filter rechts, Mikrofon, runder Senden-Knopf.
+- „Kontext: N von M“ unter dem Eingabefeld.
+- Linke Leiste mit Neuer Chat, Erkunden, Bibliothek, Chats und **Einstellungen mit Zahnrad unten links**. Einstellungen sind jetzt eine eigene Seite mit „Zurück zur App“.
+- Entfernt: der alte Dialog „Modelle verwalten“ (ersetzt durch Erkunden und Bibliothek) und die Pop-up-Fenster.
+
