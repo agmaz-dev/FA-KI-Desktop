@@ -163,7 +163,30 @@ export function mountExplore(root, ctx) {
 
     if (d.readme) {
       right.appendChild(el('h3', null, 'README'));
+      const tb = el('button', 'btn small', 'Auf Deutsch übersetzen');
+      const tst = el('span', 'note', '');
+      const bar = el('div', 'inline'); bar.append(tb, tst);
+      right.appendChild(bar);
       const md = el('div', 'md readme');
+      const showMd = (t) => {
+        md.innerHTML = ctx.renderMd(t);
+        md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
+        md.querySelectorAll('img').forEach((i) => i.remove());
+      };
+      let translated = '';
+      let showingDe = false;
+      tb.onclick = async () => {
+        if (showingDe) { showMd(d.readme); showingDe = false; tb.textContent = 'Auf Deutsch übersetzen'; tst.textContent = ''; return; }
+        if (!translated) {
+          const model = ctx.currentModel();
+          if (!model) { tst.textContent = 'Bitte zuerst ein Modell wählen.'; return; }
+          tb.disabled = true; tst.textContent = 'Übersetze mit ' + model + ' … (erste ' + 6000 + ' Zeichen)';
+          try { translated = await api.hf.translate({ model, text: d.readme }); }
+          catch (e) { tst.textContent = 'Übersetzung fehlgeschlagen: ' + cleanErr(e); tb.disabled = false; return; }
+          tb.disabled = false;
+        }
+        showMd(translated); showingDe = true; tb.textContent = 'Original zeigen'; tst.textContent = 'Maschinell übersetzt, nur die ersten 6000 Zeichen.';
+      };
       md.innerHTML = ctx.renderMd(d.readme);
       md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
       md.querySelectorAll('img').forEach((i) => i.remove());
