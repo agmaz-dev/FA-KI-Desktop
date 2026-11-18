@@ -37,14 +37,41 @@ export function mountExplore(root, ctx) {
   root.innerHTML = '';
   const api = ctx.api;
   const page = el('div', 'explore');
-  const { box: sbox, inp: q } = searchBox('Modelle auf Hugging Face suchen, z. B. qwen, gpt-oss, gemma', (now) => { if (now) doSearch(); });
-  page.appendChild(sbox);
+  const HKEY = 'fa-explore-history';
+  const loadHist = () => { try { const v = JSON.parse(localStorage.getItem(HKEY) || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 15) : []; } catch { return []; } };
+  const saveHist = (arr) => { try { localStorage.setItem(HKEY, JSON.stringify(arr.slice(0, 15))); } catch { /* egal */ } };
+  const { box: sbox, inp: q } = searchBox('Modelle auf Hugging Face suchen, z. B. qwen, gpt-oss, gemma', (now) => { if (now) { hideHist(); doSearch(); } else showHist(); });
+  const sWrap = el('div', 'search-wrap');
+  const histBox = el('div', 'history hidden');
+  sWrap.append(sbox, histBox);
+  page.appendChild(sWrap);
+  function hideHist() { histBox.classList.add('hidden'); }
+  function showHist() {
+    const f = q.value.trim().toLowerCase();
+    const items = loadHist().filter((h) => !f || (h.toLowerCase().includes(f) && h.toLowerCase() !== f));
+    histBox.innerHTML = '';
+    if (!items.length) return hideHist();
+    const head = el('div', 'hist-head');
+    head.appendChild(el('span', 'note', 'Letzte Suchen'));
+    const clr = el('button', 'link-btn', 'Verlauf löschen');
+    clr.onmousedown = (e) => { e.preventDefault(); saveHist([]); hideHist(); };
+    head.appendChild(clr);
+    histBox.appendChild(head);
+    for (const h of items) {
+      const b = el('button', 'hist-item', h);
+      b.onmousedown = (e) => { e.preventDefault(); q.value = h; hideHist(); doSearch(); };
+      histBox.appendChild(b);
+    }
+    histBox.classList.remove('hidden');
+  }
+  q.addEventListener('focus', showHist);
+  q.addEventListener('blur', () => setTimeout(hideHist, 120));
 
   const info = el('div', 'result-bar');
   const count = el('span', 'note', '');
   const refresh = el('button', 'icon-btn small'); refresh.innerHTML = icon('refresh2', 14); refresh.title = 'Neu suchen'; refresh.onclick = () => doSearch();
   const sort = document.createElement('select'); sort.className = 'mini';
-  for (const [v, t] of [['downloads', 'Beliebteste'], ['trendingScore', 'Im Trend'], ['likes', 'Meiste Likes'], ['lastModified', 'Neueste']]) { const o = el('option', null, t); o.value = v; sort.appendChild(o); }
+  for (const [v, t] of [['downloads', 'Meiste Downloads'], ['likes', 'Meiste Likes'], ['trendingScore', 'Im Trend'], ['lastModified', 'Zuletzt aktualisiert'], ['createdAt', 'Neueste']]) { const o = el('option', null, t); o.value = v; sort.appendChild(o); }
   const left0 = el('div', 'rb-left'); left0.append(count, refresh);
   info.append(left0, sort);
 
@@ -143,7 +170,7 @@ export function mountExplore(root, ctx) {
     right.appendChild(kv);
     if (d.features.length) right.appendChild(el('div', 'note', 'Funktionen sind nur aus den Schlagworten des Modells geschätzt und können fehlen oder abweichen. „Passt auf Deine Karte“ rechnet mit den Werten aus Einstellungen → Standardwerte für lokale Modelle.'));
 
-    if (d.readme) {
+    {
       right.appendChild(el('h3', null, 'README'));
       const tb = el('button', 'btn small', 'Auf Deutsch übersetzen');
       const tst = el('span', 'note', '');
@@ -157,6 +184,7 @@ export function mountExplore(root, ctx) {
       };
       let translated = '';
       let showingDe = false;
+      if (!d.readme) tb.disabled = true;
       tb.onclick = async () => {
         if (showingDe) { showMd(d.readme); showingDe = false; tb.textContent = 'Auf Deutsch übersetzen'; tst.textContent = ''; return; }
         if (!translated) {
@@ -169,7 +197,7 @@ export function mountExplore(root, ctx) {
         }
         showMd(translated); showingDe = true; tb.textContent = 'Original zeigen'; tst.textContent = 'Maschinell übersetzt, nur die ersten 6000 Zeichen.';
       };
-      md.innerHTML = ctx.renderMd(d.readme);
+      md.innerHTML = ctx.renderMd(d.readme || '*Für dieses Modell gibt es keine Beschreibung (README).*');
       md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
       md.querySelectorAll('img').forEach((i) => i.remove());
       right.appendChild(md);
@@ -179,6 +207,8 @@ export function mountExplore(root, ctx) {
 
   async function doSearch() {
     left.innerHTML = '';
+    const term = q.value.trim();
+    if (term) saveHist([term, ...loadHist().filter((h) => h.toLowerCase() !== term.toLowerCase())]);
     count.textContent = 'Suche …';
     let list = [];
     try { list = await api.hf.search({ query: q.value.trim(), sort: sort.value }); }
@@ -189,12 +219,15 @@ export function mountExplore(root, ctx) {
       const [author, name] = m.id.split('/');
       const c = el('button', 'model-card' + (m.id === selected ? ' active' : ''));
       c.dataset.id = m.id;
-      c.appendChild(el('div', 'mc-name', name));
-      c.appendChild(el('div', 'mc-author', author));
-      const sub = el('div', 'mc-sub');
-      sub.appendChild(el('span', null, '↓ ' + fmtNum(m.downloads)));
-      for (const f of m.features) sub.appendChild(el('span', 'badge feat', f));
-      c.appendChild(sub);
+      const l = el('div', 'mc-left');
+      const nm = el('div', 'mc-name', name); nm.title = m.id;
+      l.append(nm, el('div', 'mc-author', author));
+      if (m.features.length) { const sub = el('div', 'mc-sub'); for (const f of m.features) sub.appendChild(el('span', 'badge feat', f)); l.appendChild(sub); }
+      const r = el('div', 'mc-right');
+      const st = el('div', 'mc-stats');
+      st.append(el('span', null, '☆ ' + m.likes.toLocaleString('de-DE')), el('span', null, '⤓ ' + m.downloads.toLocaleString('de-DE')));
+      r.append(st, el('div', 'mc-ago', ago(m.updated)));
+      c.append(l, r);
       c.onclick = () => openDetail(m.id);
       left.appendChild(c);
     }
