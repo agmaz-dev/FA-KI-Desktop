@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.3.0
+
+- **Mac:** Version für Apple-Chips (M1 und neuer) als .dmg. Eigene Engine mit Metal, Spracherkennung (Whisper) mit Metal, Mikrofon-Berechtigung, Mac-Menü. „Meine Stimme“ (OuteTTS) und die GPU-Anzeige gibt es nur unter Windows. Das Programm ist nicht von Apple beglaubigt: beim ersten Start Rechtsklick → Öffnen.
+
 ## Neu in 2.2.6
 
 - **Mikrofon-Pegel:** wird jetzt auch aus der fertigen Aufnahme gemessen und der Audio-Kontext der Pegelanzeige wird gestartet (resume), damit keine falsche „Stille“-Meldung kommt.

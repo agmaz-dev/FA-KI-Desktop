@@ -55,9 +55,12 @@ function createWindow() {
     },
   });
   // Menüleiste bleibt versteckt, aber Bearbeiten-Tastenkürzel (Einfügen, Kopieren …) funktionieren.
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  const menuTpl = [
     { label: 'Bearbeiten', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-  ]));
+  ];
+  if (process.platform === 'darwin') menuTpl.unshift({ role: 'appMenu' });
+  if (process.platform === 'darwin') menuTpl.push({ role: 'windowMenu' });
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTpl));
   win.setMenuBarVisibility(false);
   // Electron 45: clipboard.readImage gibt es nicht mehr, die Zwischenablage liefert ClipboardItems (async).
   const readClipImage = async () => {

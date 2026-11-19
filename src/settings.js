@@ -455,8 +455,9 @@ export async function openSettings(ctx, startTab = 'general') {
       vc.appendChild(bOld);
     }
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
-    body.appendChild(vc);
-    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine === 'server' ? 'server' : 'supertonic'), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Supertonic automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
+    const isMac = /Mac/i.test(navigator.platform);
+    if (!isMac) body.appendChild(vc);
+    if (!isMac) body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine === 'server' ? 'server' : 'supertonic'), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Supertonic automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');

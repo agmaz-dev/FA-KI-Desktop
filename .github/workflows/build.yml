@@ -1,4 +1,4 @@
-name: Windows-Installer bauen
+name: Installer bauen (Windows und Mac)
 
 on:
   push:
@@ -84,11 +84,8 @@ jobs:
           V="${{ steps.ver.outputs.v }}"
           F="dist/FA-KI-Desktop-Setup-$V.exe"
           SHA="${{ github.event.pull_request.head.sha || github.sha }}"
-          if gh release view "v$V-test" >/dev/null 2>&1; then
-            gh release upload "v$V-test" "$F" --clobber
-          else
-            gh release create "v$V-test" "$F" --prerelease --target "$SHA" --title "FA KI Desktop $V (Testversion)" --notes "Testversion aus einem Pull Request."
-          fi
+          gh release create "v$V-test" --prerelease --target "$SHA" --title "FA KI Desktop $V (Testversion)" --notes "Testversion aus einem Pull Request." >/dev/null 2>&1 || true
+          gh release upload "v$V-test" "$F" --clobber
       - name: Release erstellen oder aktualisieren
         if: github.ref == 'refs/heads/main'
         shell: bash
@@ -97,9 +94,91 @@ jobs:
         run: |
           V="${{ steps.ver.outputs.v }}"
           F="dist/FA-KI-Desktop-Setup-$V.exe"
-          if gh release view "v$V" >/dev/null 2>&1; then
-            # Kein --clobber: ein veröffentlichtes Installationsprogramm wird nie still überschrieben.
-            echo "::warning::Release v$V gibt es schon – bitte die Version in package.json erhöhen. Nichts hochgeladen."
-          else
-            gh release create "v$V" "$F" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramm für Windows."
-          fi
+          gh release create "v$V" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramme für Windows und Mac." >/dev/null 2>&1 || true
+          # Kein --clobber: ein veröffentlichtes Installationsprogramm wird nie still überschrieben.
+          gh release upload "v$V" "$F" || echo "::warning::$F ist in Release v$V schon vorhanden – bitte die Version in package.json erhöhen."
+
+  mac:
+    runs-on: macos-14 # Apple Silicon (M1)
+    timeout-minutes: 60
+    env:
+      WHISPER_CPP_REF: v1.9.5
+      LLAMA_CPP_TAG: b12530
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Spracherkennung (whisper.cpp, Metal) bauen
+        run: |
+          git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
+          cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON
+          cmake --build wcpp/build --config Release -j 4 --target whisper-cli whisper-server
+          mkdir -p build-bundled/whisper
+          find wcpp/build -type f -name whisper-cli -exec cp {} build-bundled/whisper/ \;
+          find wcpp/build -type f -name whisper-server -exec cp {} build-bundled/whisper/ \;
+          chmod +x build-bundled/whisper/*
+          ls -la build-bundled/whisper
+          test -x build-bundled/whisper/whisper-cli
+          test -x build-bundled/whisper/whisper-server
+      - name: Eigene Engine (llama.cpp, Metal) laden
+        run: |
+          mkdir -p llama-dl llama-x build-bundled/llama
+          gh release download "$LLAMA_CPP_TAG" --repo ggml-org/llama.cpp --pattern "llama-*-bin-macos-arm64.*" --dir llama-dl
+          ls -la llama-dl
+          for f in llama-dl/*; do
+            case "$f" in
+              *.zip) unzip -q -o "$f" -d llama-x ;;
+              *.tar.gz|*.tgz) tar -xzf "$f" -C llama-x ;;
+            esac
+          done
+          SRV=$(find llama-x -type f -name llama-server | head -1)
+          test -n "$SRV"
+          cp -R "$(dirname "$SRV")"/. build-bundled/llama/
+          chmod +x build-bundled/llama/llama-server
+          echo "$LLAMA_CPP_TAG" > build-bundled/llama/VERSION
+          ls -la build-bundled/llama | head -30
+      - run: npm ci
+      - run: npm test
+      - name: Mac-Programm bauen
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Programm lokal signieren (ohne Entwicklerkonto) und DMG erstellen
+        run: |
+          APP="$(ls -d dist/mac-arm64/*.app | head -1)"
+          echo "App: $APP"
+          test -x "$APP/Contents/Resources/llama/llama-server"
+          test -x "$APP/Contents/Resources/whisper/whisper-server"
+          # Lose Programme und Bibliotheken zuerst, dann das ganze Programm (ad-hoc, "-").
+          find "$APP/Contents/Resources" -type f \( -name "*.dylib" -o -name "*.node" -o -perm +111 \) -print0 | while IFS= read -r -d '' f; do
+            if file "$f" | grep -q "Mach-O"; then codesign --force -s - "$f" || true; fi
+          done
+          codesign --force --deep -s - "$APP"
+          codesign --verify --deep --strict "$APP" && echo "Signatur ok"
+          V="$(node -p "require('./package.json').version")"
+          mkdir -p dmg-src
+          cp -R "$APP" dmg-src/
+          ln -s /Applications dmg-src/Applications
+          hdiutil create -volname "FA KI Desktop" -srcfolder dmg-src -ov -format UDZO "dist/FA-KI-Desktop-$V-mac-arm64.dmg"
+          ls -la dist/*.dmg
+      - name: Version ermitteln
+        id: ver
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Mac-Version als Prerelease bereitstellen
+        if: github.ref != 'refs/heads/main'
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          F="dist/FA-KI-Desktop-$V-mac-arm64.dmg"
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          gh release create "v$V-test" --prerelease --target "$SHA" --title "FA KI Desktop $V (Testversion)" --notes "Testversion aus einem Pull Request." >/dev/null 2>&1 || true
+          gh release upload "v$V-test" "$F" --clobber
+      - name: Mac-Version ins Release legen
+        if: github.ref == 'refs/heads/main'
+        run: |
+          V="${{ steps.ver.outputs.v }}"
+          F="dist/FA-KI-Desktop-$V-mac-arm64.dmg"
+          gh release create "v$V" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramme für Windows und Mac." >/dev/null 2>&1 || true
+          gh release upload "v$V" "$F" || echo "::warning::$F ist in Release v$V schon vorhanden."
