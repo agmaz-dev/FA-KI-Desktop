@@ -59,17 +59,30 @@ function createWindow() {
     { label: 'Bearbeiten', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
   ]));
   win.setMenuBarVisibility(false);
-  win.webContents.on('context-menu', (_e, params) => {
+  // Electron 45: clipboard.readImage gibt es nicht mehr, die Zwischenablage liefert ClipboardItems (async).
+  const readClipImage = async () => {
+    try {
+      const items = await clipboard.read();
+      for (const it of items || []) {
+        const t = (it.types || []).find((x) => x === 'image/png') || (it.types || []).find((x) => /^image\//.test(x));
+        if (!t) continue;
+        const blob = await it.getType(t);
+        return Buffer.from(await blob.arrayBuffer());
+      }
+    } catch { /* keine Zwischenablage */ }
+    return null;
+  };
+  win.webContents.on('context-menu', async (_e, params) => {
     const items = [];
     if (params.isEditable) {
       items.push({ label: 'Ausschneiden', role: 'cut', enabled: params.editFlags.canCut }, { label: 'Kopieren', role: 'copy', enabled: params.editFlags.canCopy }, { label: 'Einfügen', role: 'paste', enabled: params.editFlags.canPaste });
-      const img = clipboard.readImage();
-      if (!img.isEmpty()) items.push({ label: 'Bild einfügen', click: () => send('clip:image', img.toPNG()) });
+      const png = await readClipImage();
+      if (png) items.push({ label: 'Bild einfügen', click: () => send('clip:image', png) });
       items.push({ type: 'separator' }, { label: 'Alles auswählen', role: 'selectAll' });
     } else if (params.selectionText) {
       items.push({ label: 'Kopieren', role: 'copy' }, { label: 'Alles auswählen', role: 'selectAll' });
     }
-    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+    if (items.length && !win.isDestroyed()) Menu.buildFromTemplate(items).popup({ window: win });
   });
   win.loadFile(path.join(__dirname, 'build', 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => {

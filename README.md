@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.2.1
+
+- **Rechtsklick im Eingabefeld:** Fehler behoben („clipboard.readImage is not a function“), „Bild einfügen“ funktioniert wieder.
+
 ## Neu in 2.2.0
 
 - **Browser mit Tabs:** mehrere Tabs im Seitenfenster (+ für neuen Tab, × zum Schließen, Links mit neuem Fenster öffnen als Tab).
