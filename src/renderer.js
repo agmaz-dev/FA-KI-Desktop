@@ -49,7 +49,10 @@ function applyAppearance(s) {
   const theme = s.theme === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.setProperty('--fs', (s.fontSize || 16) + 'px');
-  document.body.classList.toggle('serif', !!s.serif);
+  const stack = (name, fallback) => { const n = String(name || '').replace(/["';{}<>\\]/g, '').trim(); return n ? `"${n}", ${fallback}` : fallback; };
+  const root = document.documentElement.style;
+  root.setProperty('--font-sans', stack(s.fontUi, 'system-ui, sans-serif'));
+  root.setProperty('--font-answer', stack(s.fontAnswer, 'Georgia, serif'));
 }
 
 // ---------- Hinweise / Fortschritt ----------
@@ -103,6 +106,18 @@ function extractHtml(md) {
 function initPanel() {
   api.panel.onState((s) => {
     panelSt.open = !!s.open; panelSt.mode = s.mode || ''; panelSt.canBack = !!s.canBack; panelSt.canForward = !!s.canForward;
+    const tabsEl = $('pTabs'); tabsEl.textContent = '';
+    (s.tabs || []).forEach((t) => {
+      const b = document.createElement('div'); b.className = 'ptab' + (t.id === s.active ? ' on' : ''); b.title = t.title;
+      const tt = document.createElement('span'); tt.className = 't'; tt.textContent = t.title;
+      const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Tab schließen';
+      x.onclick = (ev) => { ev.stopPropagation(); api.panel.closeTab(t.id); };
+      b.onclick = () => api.panel.selectTab(t.id);
+      b.append(tt, x); tabsEl.appendChild(b);
+    });
+    const plus = document.createElement('button'); plus.className = 'ptab-new'; plus.textContent = '+'; plus.title = 'Neuer Tab';
+    plus.onclick = () => { api.panel.newTab(''); setTimeout(() => $('pUrl').focus(), 120); };
+    tabsEl.appendChild(plus);
     const web = s.mode !== 'html';
     $('pTitle').classList.toggle('hidden', web); $('pUrl').classList.toggle('hidden', !web);
     $('pTitle').textContent = s.open && !web ? (s.title || '') : '';

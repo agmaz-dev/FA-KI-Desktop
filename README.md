@@ -11,6 +11,12 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.2.0
+
+- **Browser mit Tabs:** mehrere Tabs im Seitenfenster (+ für neuen Tab, × zum Schließen, Links mit neuem Fenster öffnen als Tab).
+- **Schriftarten:** in Einstellungen → Allgemein getrennt für die App und für die Antworten, aus einer Liste oder mit dem Namen einer installierten Schrift. Der Schalter „Serifenschrift“ ist dadurch ersetzt.
+- **Symbol:** das Programm-Symbol ist jetzt orange wie in der App.
+
 ## Neu in 2.1.2
 
 - **E-Mail:** verständliche Fehlermeldung bei abgelehnter Anmeldung (App-Passwort nötig); Leerzeichen im App-Passwort werden entfernt.

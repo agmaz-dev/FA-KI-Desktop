@@ -18,8 +18,6 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: var(--fs)/1.55 var(--font-sans); }
-body.serif { --font-answer: var(--font-serif); }
-body:not(.serif) { --font-answer: var(--font-sans); }
 .hidden { display: none !important; }
 .spacer { flex: 1; }
 #app { display: flex; height: 100vh; }
@@ -381,6 +379,16 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 #panelSplit:hover::after, #panelSplit.drag::after { background: var(--accent); }
 #panel { width: var(--panelw, 520px); flex: none; display: flex; flex-direction: column; background: var(--side); border-left: 1px solid var(--line); min-width: 0; }
 .panel-bar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--line); min-height: 48px; }
+.panel-tabs { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.panel-tabs.hidden { display: none; }
+.ptab { display: flex; align-items: center; gap: 6px; max-width: 170px; min-width: 70px; height: 30px; padding: 0 6px 0 12px; border-radius: 9px 9px 0 0; background: transparent; color: var(--muted); font-size: 12.5px; cursor: pointer; border: 0; }
+.ptab span.t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.ptab:hover { background: rgba(255,255,255,.05); }
+.ptab.on { background: rgba(255,255,255,.09); color: var(--text); }
+.ptab .x { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; }
+.ptab .x:hover { background: rgba(255,255,255,.15); }
+.ptab-new { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; flex: none; }
+.ptab-new:hover { background: rgba(255,255,255,.08); color: var(--text); }
 .panel-url { flex: 1; min-width: 0; margin: 0 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border, #3a3a3a); background: rgba(255,255,255,.05); color: inherit; font: inherit; font-size: 13px; outline: none; }
 .panel-url:focus { border-color: var(--accent, #d97757); }
 .panel-title { flex: 1; min-width: 0; padding: 0 8px; font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -145,9 +145,22 @@ export async function openSettings(ctx, startTab = 'general') {
   function general(body) {
     body.appendChild(el('h2', null, 'Allgemein'));
     body.appendChild(formRow('Erscheinungsbild', bind(selectOf([['dark', 'Dunkel'], ['light', 'Hell']], draft.theme), 'theme')));
-    const sf = switchRow('Antworten in Serifenschrift', 'Wie bei Claude: die KI-Antworten erscheinen in einer Buchschrift.', draft.serif);
-    bind(sf.cb, 'serif');
-    body.appendChild(sf.row);
+    const FONTS = ['Segoe UI Variable Text', 'Segoe UI', 'Arial', 'Calibri', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Cambria', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', 'Constantia', 'Consolas', 'Courier New', 'Comic Sans MS'];
+    const dl = el('datalist'); dl.id = 'fontList'; FONTS.forEach((f) => { const o = el('option'); o.value = f; dl.appendChild(o); });
+    body.appendChild(dl);
+    const fontRow = (label, key, note) => {
+      const inp = input('text', draft[key] || '', { placeholder: 'Schriftname, z. B. Arial' });
+      inp.setAttribute('list', 'fontList');
+      inp.addEventListener('input', () => { draft[key] = inp.value.trim(); ctx.apply(draft); });
+      inp.addEventListener('focus', () => inp.select());
+      const r = formRow(label, inp); r.appendChild(el('div', 'note', note)); r.style.marginTop = '14px';
+      const sample = el('div', 'note', 'Der schnelle braune Fuchs springt über den faulen Hund 0123');
+      const upd = () => { sample.style.fontFamily = `"${inp.value.replace(/["';{}<>\\]/g, '')}", sans-serif`; sample.style.fontSize = '15px'; };
+      inp.addEventListener('input', upd); upd(); r.appendChild(sample);
+      return r;
+    };
+    body.appendChild(fontRow('Schriftart der App', 'fontUi', 'Menüs, Listen und Einstellungen. Wähle aus der Liste oder tippe den Namen einer Schrift ein, die auf Deinem PC installiert ist.'));
+    body.appendChild(fontRow('Schriftart der Antworten', 'fontAnswer', 'Chat-Antworten und Eingabe. Gleicher Name wie oben, falls Du überall dieselbe Schrift willst.'));
     const fs = input('range', draft.fontSize, { min: 13, max: 21, step: 1 });
     const fsl = el('div', 'note', `Textgröße: ${draft.fontSize} px`);
     fs.addEventListener('input', () => { draft.fontSize = Number(fs.value); fsl.textContent = `Textgröße: ${fs.value} px`; ctx.apply(draft); });

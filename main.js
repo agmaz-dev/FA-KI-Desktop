@@ -293,6 +293,9 @@ function registerIpc() {
   ipcMain.handle('panel:bounds', (_e, { rect, visible }) => { panel.setBounds(rect, visible); return true; });
   ipcMain.handle('panel:openUrl', (_e, url) => { panel.openUrl(String(url)); return true; });
   ipcMain.handle('panel:html', (_e, { html, title }) => { panel.showHtml(html, title); return true; });
+  ipcMain.handle('panel:newTab', (_e, url) => { panel.newTab(url ? String(url) : ''); return true; });
+  ipcMain.handle('panel:selectTab', (_e, id) => { panel.selectTab(+id); return true; });
+  ipcMain.handle('panel:closeTab', (_e, id) => { panel.closeTab(+id); return true; });
   ipcMain.handle('panel:nav', (_e, what) => { panel.nav(String(what)); return true; });
   ipcMain.handle('panel:close', () => { panel.close(); return true; });
   ipcMain.handle('panel:external', () => { const u = panel.currentUrl(); if (u) shell.openExternal(u); return true; });
