@@ -324,3 +324,18 @@ test('Prozesse: fehlendes Programm wird sofort gemeldet', async () => {
   assert.ok(child.spawnError && child.spawnError.code === 'ENOENT');
   assert.strictEqual(await p.freePort('http://127.0.0.1:8004'), false); // ohne eigenen Ordner wird nie etwas beendet
 });
+
+test('parseGpuMac liest die Apple-GPU-Auslastung', () => {
+  const { parseGpuMac } = require('../lib/sysstats');
+  assert.strictEqual(parseGpuMac('"PerformanceStatistics" = {"Device Utilization %"=37,"Renderer Utilization %"=10}'), 37);
+  assert.strictEqual(parseGpuMac('nichts'), null);
+});
+test('hwFor: Mac nutzt gemeinsamen Speicher, Windows die Einstellung', () => {
+  const hf = require('../lib/hf');
+  const GIB = 1024 ** 3;
+  assert.deepStrictEqual(hf.hwFor({ vramGb: 16, ramGb: 32 }, 'win32', 32 * GIB), { vramGb: 16, ramGb: 32 });
+  const m = hf.hwFor({}, 'darwin', 16 * GIB);
+  assert.ok(m.vramGb > 8 && m.vramGb < 11 && m.ramGb === 0);
+  assert.strictEqual(hf.fitFor(14 * GIB, m).fit, 'nein');
+  assert.strictEqual(hf.fitFor(5 * GIB, m).fit, 'gpu');
+});

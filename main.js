@@ -15,6 +15,7 @@ const { Supertonic } = require('./lib/supertonic');
 const tools = require('./lib/tools');
 const github = require('./lib/github');
 const agent = require('./lib/agent');
+const os = require('os');
 const hf = require('./lib/hf');
 const { SysStats } = require('./lib/sysstats');
 const mail = require('./lib/mail');
@@ -260,7 +261,7 @@ function registerIpc() {
   ipcMain.handle('agent:check', () => agent.checkTools());
   ipcMain.handle('agent:openDir', () => { const d = store.getSettings().agentDir; return d ? shell.openPath(d) : ''; });
   ipcMain.handle('hf:search', (_e, { query, sort }) => hf.search(query, { sort }));
-  ipcMain.handle('hf:details', (_e, id) => hf.details(id, { vramGb: store.getSettings().vramGb, ramGb: store.getSettings().ramGb }));
+  ipcMain.handle('hf:details', (_e, id) => hf.details(id, hf.hwFor(store.getSettings(), process.platform, os.totalmem())));
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));

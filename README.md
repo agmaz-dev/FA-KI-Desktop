@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.4.0
+
+- Mac: Die GPU-Anzeige in der Seitenleiste zeigt jetzt die Auslastung der Apple-GPU.
+- Mac: „Erkunden“ rechnet mit dem gemeinsamen Speicher des Macs (ca. zwei Drittel für die GPU) und empfiehlt nur Modelle, die wirklich passen. Die Felder „Grafikspeicher/Arbeitsspeicher“ entfallen dort.
+
 ## Neu in 2.3.0
 
 - **Mac:** Version für Apple-Chips (M1 und neuer) als .dmg. Eigene Engine mit Metal, Spracherkennung (Whisper) mit Metal, Mikrofon-Berechtigung, Mac-Menü. „Meine Stimme“ (OuteTTS) und die GPU-Anzeige gibt es nur unter Windows. Das Programm ist nicht von Apple beglaubigt: beim ersten Start Rechtsklick → Öffnen.

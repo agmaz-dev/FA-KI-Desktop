@@ -187,12 +187,14 @@ export async function openSettings(ctx, startTab = 'general') {
     body.appendChild(formRow('Modellordner', el('div', 'note', 'Wird in der Bibliothek geändert (Erkunden → Bibliothek → Modellordner).'), ''));
     body.appendChild(formRow('Standard-Denktiefe', bind(selectOf([['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], draft.think), 'think'), 'Bei gpt-oss. Du kannst sie im Chat jederzeit ändern.'));
 
-    body.appendChild(el('h3', null, 'Dein PC (für „Erkunden“)'));
-    body.lastChild.style.margin = '22px 0 8px';
-    const hw = el('div', 'two');
-    hw.appendChild(formRow('Grafikspeicher (GB)', bind(input('number', draft.vramGb, { min: 2, max: 256, step: 1 }), 'vramGb', (v) => Math.max(2, parseInt(v, 10) || 16)), 'Damit „Erkunden“ zeigt, was ganz auf die Karte passt. RX 7800 XT: 16.'));
-    hw.appendChild(formRow('Arbeitsspeicher (GB)', bind(input('number', draft.ramGb, { min: 4, max: 1024, step: 1 }), 'ramGb', (v) => Math.max(4, parseInt(v, 10) || 32)), 'Für Modelle, die nur teilweise auf die Karte passen.'));
-    body.appendChild(hw);
+    if (!/Mac/i.test(navigator.platform)) { // Auf dem Mac wird der Speicher automatisch erkannt
+      body.appendChild(el('h3', null, 'Dein PC (für „Erkunden“)'));
+      body.lastChild.style.margin = '22px 0 8px';
+      const hw = el('div', 'two');
+      hw.appendChild(formRow('Grafikspeicher (GB)', bind(input('number', draft.vramGb, { min: 2, max: 256, step: 1 }), 'vramGb', (v) => Math.max(2, parseInt(v, 10) || 16)), 'Damit „Erkunden“ zeigt, was ganz auf die Karte passt. RX 7800 XT: 16.'));
+      hw.appendChild(formRow('Arbeitsspeicher (GB)', bind(input('number', draft.ramGb, { min: 4, max: 1024, step: 1 }), 'ramGb', (v) => Math.max(4, parseInt(v, 10) || 32)), 'Für Modelle, die nur teilweise auf die Karte passen.'));
+      body.appendChild(hw);
+    }
   }
 
   // ---------- Internet und Agent ----------
