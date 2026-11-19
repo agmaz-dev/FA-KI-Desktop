@@ -45,14 +45,12 @@ function newChat() {
 }
 
 // ---------- Aussehen ----------
-const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 function applyAppearance(s) {
-  const theme = s.theme === 'system' ? (darkQuery.matches ? 'dark' : 'light') : s.theme;
+  const theme = s.theme === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.setProperty('--fs', (s.fontSize || 16) + 'px');
   document.body.classList.toggle('serif', !!s.serif);
 }
-darkQuery.addEventListener('change', () => applyAppearance(state.settings));
 
 // ---------- Hinweise / Fortschritt ----------
 let hintTimer = null;

@@ -135,7 +135,7 @@ export async function openSettings(ctx, startTab = 'general') {
   // ---------- Allgemein ----------
   function general(body) {
     body.appendChild(el('h2', null, 'Allgemein'));
-    body.appendChild(formRow('Erscheinungsbild', bind(selectOf([['system', 'Wie Windows'], ['light', 'Hell'], ['dark', 'Dunkel']], draft.theme), 'theme')));
+    body.appendChild(formRow('Erscheinungsbild', bind(selectOf([['dark', 'Dunkel'], ['light', 'Hell']], draft.theme), 'theme')));
     const sf = switchRow('Antworten in Serifenschrift', 'Wie bei Claude: die KI-Antworten erscheinen in einer Buchschrift.', draft.serif);
     bind(sf.cb, 'serif');
     body.appendChild(sf.row);

@@ -18,6 +18,9 @@ function ago(iso) {
   return m < 24 ? `vor ${m} Monaten` : `vor ${Math.round(d / 365)} Jahren`;
 }
 
+const AV_COLORS = ['#7c5cd6', '#2f8f83', '#c0563f', '#3b82c4', '#b8873a', '#b34f8a', '#5a8f3a'];
+function avatarColor(name) { let h = 0; for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; }
+
 function searchBox(placeholder, onInput) {
   const box = el('div', 'search-box');
   const ic = el('span', 'sb-icon'); ic.innerHTML = icon('search', 16);
@@ -123,9 +126,10 @@ export function mountExplore(root, ctx) {
     right.appendChild(el('h2', null, name));
     right.appendChild(el('div', 'repo-id', d.id));
     const stats = el('div', 'stats-row');
-    stats.appendChild(el('span', null, '↓ ' + fmtNum(d.downloads)));
-    stats.appendChild(el('span', null, '♥ ' + fmtNum(d.likes)));
-    if (d.updated) stats.appendChild(el('span', null, 'Aktualisiert ' + ago(d.updated)));
+    const chip = (k, v) => { const c = el('div', 'stat-chip'); c.append(el('small', null, k), el('span', null, v)); stats.appendChild(c); };
+    chip('Downloads', d.downloads.toLocaleString('de-DE'));
+    chip('Likes', d.likes.toLocaleString('de-DE'));
+    if (d.updated) chip('Aktualisiert', ago(d.updated));
     const web = el('a', 'web-link', 'Im Web öffnen ↗'); web.href = 'https://huggingface.co/' + d.id; web.target = '_blank'; web.rel = 'noreferrer';
     stats.appendChild(web);
     right.appendChild(stats);
@@ -219,15 +223,21 @@ export function mountExplore(root, ctx) {
       const [author, name] = m.id.split('/');
       const c = el('button', 'model-card' + (m.id === selected ? ' active' : ''));
       c.dataset.id = m.id;
+      const av = el('div', 'mc-av', (author || '?').charAt(0).toUpperCase());
+      av.style.background = avatarColor(author);
       const l = el('div', 'mc-left');
       const nm = el('div', 'mc-name', name); nm.title = m.id;
-      l.append(nm, el('div', 'mc-author', author));
-      if (m.features.length) { const sub = el('div', 'mc-sub'); for (const f of m.features) sub.appendChild(el('span', 'badge feat', f)); l.appendChild(sub); }
+      const au = el('div', 'mc-author');
+      au.appendChild(el('span', null, author));
+      const caps = el('span', 'mc-caps');
+      for (const f of m.features) { const k = el('span', 'mc-cap', f.charAt(0)); k.title = f; caps.appendChild(k); }
+      if (m.features.length) au.appendChild(caps);
+      l.append(nm, au);
       const r = el('div', 'mc-right');
       const st = el('div', 'mc-stats');
-      st.append(el('span', null, '☆ ' + m.likes.toLocaleString('de-DE')), el('span', null, '⤓ ' + m.downloads.toLocaleString('de-DE')));
+      st.append(el('span', null, '☆ ' + m.likes.toLocaleString('de-DE')), el('span', null, '⤓ ' + fmtNum(m.downloads)));
       r.append(st, el('div', 'mc-ago', ago(m.updated)));
-      c.append(l, r);
+      c.append(av, l, r);
       c.onclick = () => openDetail(m.id);
       left.appendChild(c);
     }

@@ -331,3 +331,20 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .hist-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--text); padding: 7px 10px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 14px; }
 .hist-item:hover { background: var(--hover); }
 .link-btn { background: transparent; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; }
+
+/* Erkunden: neues Design (Entwurf) */
+.model-card { align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; position: relative; }
+.model-card.active { background: var(--accent-soft); color: var(--text); }
+.model-card.active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--accent); }
+.model-card.active .mc-author, .model-card.active .mc-right { color: var(--muted); }
+.mc-av { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; }
+.mc-author { display: flex; gap: 8px; align-items: center; }
+.mc-caps { display: flex; gap: 4px; }
+.mc-cap { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font-size: 10px; display: grid; place-items: center; }
+.mc-right { align-self: center; }
+.stats-row { gap: 10px; border-bottom: 0; padding-bottom: 4px; }
+.stat-chip { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 14px; color: var(--text); }
+.stat-chip small { display: block; color: var(--muted); font-size: 11.5px; }
+.stat-chip span { font-weight: 600; }
+.stats-row .web-link { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; }
+.col-detail h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
