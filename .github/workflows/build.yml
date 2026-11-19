@@ -99,7 +99,7 @@ jobs:
           gh release upload "v$V" "$F" || echo "::warning::$F ist in Release v$V schon vorhanden – bitte die Version in package.json erhöhen."
 
   mac:
-    runs-on: macos-14 # Apple Silicon (M1)
+    runs-on: macos-latest # Apple Silicon (M1)
     timeout-minutes: 60
     env:
       WHISPER_CPP_REF: v1.9.5
