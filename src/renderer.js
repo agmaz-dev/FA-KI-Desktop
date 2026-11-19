@@ -402,7 +402,7 @@ function fillMsg(wrap, m, live = false, isLast = false) {
   }
   if (m.thinking) {
     const d = el('details', 'think');
-    const open = wrap._thinkOpen !== undefined ? wrap._thinkOpen : !!(live && state.settings.thinkLive);
+    const open = !!wrap._thinkOpen; // immer zu, außer Du klickst darauf
     d.open = open;
     d.addEventListener('toggle', () => { wrap._thinkOpen = d.open; });
     let label = 'Gedanken';
@@ -411,7 +411,7 @@ function fillMsg(wrap, m, live = false, isLast = false) {
       label = `Denkt nach … (${Math.round((Date.now() - m._t0) / 1000)} s)`;
     }
     d.appendChild(el('summary', null, label));
-    const tt = el('div', 'tt', m.thinking);
+    const tt = el('div', 'tt', String(m.thinking).replace(/<\/?think>/gi, ''));
     d.appendChild(tt);
     body.appendChild(d);
     if (open && live) requestAnimationFrame(() => { tt.scrollTop = tt.scrollHeight; });

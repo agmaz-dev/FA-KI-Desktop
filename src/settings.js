@@ -166,9 +166,6 @@ export async function openSettings(ctx, startTab = 'general') {
     fs.addEventListener('input', () => { draft.fontSize = Number(fs.value); fsl.textContent = `Textgröße: ${fs.value} px`; ctx.apply(draft); });
     const fr = formRow('Textgröße', fs); fr.appendChild(fsl); fr.style.marginTop = '14px';
     body.appendChild(fr);
-    const tl = switchRow('Gedankengang live aufklappen', 'Aus: er bleibt eingeklappt und zeigt nur „Denkt nach …“. Du kannst ihn jederzeit selbst öffnen.', draft.thinkLive);
-    bind(tl.cb, 'thinkLive');
-    body.appendChild(tl.row);
     const se = switchRow('Enter sendet die Nachricht', 'Aus: Enter macht eine neue Zeile, gesendet wird mit Strg+Enter.', draft.sendOnEnter);
     bind(se.cb, 'sendOnEnter');
     body.appendChild(se.row);

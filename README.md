@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.2.2
+
+- **Gedanken:** bleiben immer zugeklappt, auch beim Schreiben, und öffnen sich nur per Klick. Der Schalter „Gedankengang live aufklappen“ ist entfernt.
+
 ## Neu in 2.2.1
 
 - **Rechtsklick im Eingabefeld:** Fehler behoben („clipboard.readImage is not a function“), „Bild einfügen“ funktioniert wieder.
