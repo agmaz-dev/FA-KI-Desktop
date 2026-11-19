@@ -35,10 +35,12 @@ async function blobToWav16k(blob) {
  * Startet eine Aufnahme. Mit vad=true endet sie automatisch nach einer Sprechpause.
  * Gibt { stop(), cancel(), done } zurück; done liefert WAV-Bytes (16 kHz, mono) oder null (nichts gesprochen).
  */
-export async function startRecording({ vad = false, onLevel } = {}) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  });
+export async function startRecording({ vad = false, onLevel, deviceId = '' } = {}) {
+  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  if (deviceId) audio.deviceId = { exact: deviceId };
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio }); }
+  catch (e) { if (!deviceId) throw e; delete audio.deviceId; stream = await navigator.mediaDevices.getUserMedia({ audio }); } // gewähltes Mikrofon fehlt: Standard
   const rec = new MediaRecorder(stream);
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
@@ -61,6 +63,7 @@ export async function startRecording({ vad = false, onLevel } = {}) {
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const rms = Math.sqrt(sum / buf.length);
+    if (rms > handle.peak) handle.peak = rms;
     onLevel && onLevel(rms);
     if (rms > 0.02) { spoke = true; lastVoice = Date.now(); }
     if (vad) {
@@ -81,7 +84,8 @@ export async function startRecording({ vad = false, onLevel } = {}) {
   function stop() { if (rec.state !== 'inactive') rec.stop(); }
   function cancel() { cancelled = true; stop(); }
   rec.start(250);
-  return { stop, cancel, done };
+  const handle = { stop, cancel, done, peak: 0 };
+  return handle;
 }
 
 // ---------- Vorlesen ----------

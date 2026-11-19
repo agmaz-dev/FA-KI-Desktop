@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.2.4
+
+- **Mikrofon:** Whisper-Platzhalter wie „[Musik]“ werden nicht mehr in die Eingabe geschrieben. Unter Einstellungen → Sprache kannst Du das Mikrofon wählen und es 3 Sekunden testen. Liefert das Mikrofon nur Stille, meldet die App das.
+- **PDF/Word speichern:** Heißt der Chat wie eine Bilddatei (z. B. „Bild-123.png“), wird trotzdem immer im gewählten Format gespeichert.
+
 ## Neu in 2.2.3
 
 - **Webseiten und Folien:** kein Code mehr im Chat. Stattdessen eine kleine Karte mit „Vorschau öffnen“ und „Code kopieren“, die Seite erscheint schon beim Schreiben rechts in der Vorschau.

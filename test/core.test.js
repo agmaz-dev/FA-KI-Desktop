@@ -35,6 +35,8 @@ test('Text kürzen', () => {
 
 test('Whisper-Ausgabe säubern', () => {
   assert.strictEqual(cleanTranscript(' [BLANK_AUDIO] Hallo  Welt '), 'Hallo Welt');
+  assert.strictEqual(cleanTranscript('[Musik]'), '');
+  assert.strictEqual(cleanTranscript('(Applaus) Hallo [Musik] Welt ♪'), 'Hallo Welt');
 });
 
 test('Whisper-Paket auswählen', () => {

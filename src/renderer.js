@@ -714,14 +714,16 @@ async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
   if (!(await ensureStt())) return;
   api.speech.warmStt(state.settings.sttModel).catch(() => {}); // Modell lädt, während gesprochen wird
-  try { stopAllSpeech(); state.rec = await startRecording({ vad: false }); }
+  try { stopAllSpeech(); state.rec = await startRecording({ vad: false, deviceId: state.settings.micId }); }
   catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   $('btnMic').classList.add('rec');
   hint('Aufnahme läuft … nochmal auf das Mikrofon klicken zum Beenden.', 0);
-  const wav = await state.rec.done;
+  const recH = state.rec;
+  const wav = await recH.done;
   state.rec = null;
   $('btnMic').classList.remove('rec');
   hint('');
+  if (wav && recH.peak < 0.006) return hint('Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon und prüfe die Lautstärke in Windows.', 0);
   const t = await transcribeWav(wav);
   if (t) {
     const cur = $('input').value;
@@ -734,7 +736,7 @@ async function toggleMic() {
 async function convListen() {
   if (!state.conv || state.rec || state.streaming) return;
   api.speech.warmStt(state.settings.sttModel).catch(() => {});
-  try { state.rec = await startRecording({ vad: true }); }
+  try { state.rec = await startRecording({ vad: true, deviceId: state.settings.micId }); }
   catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   hint('Ich höre zu … sprich einfach.', 0);
   const wav = await state.rec.done;

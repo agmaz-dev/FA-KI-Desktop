@@ -477,6 +477,34 @@ export async function openSettings(ctx, startTab = 'general') {
     wtwo.appendChild(formRow('Modell', wsel, 'Medium ist am genauesten, besonders bei Türkisch und Dialekt.'));
     wtwo.appendChild(formRow('Sprache beim Diktieren', bind(selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], draft.sttLang), 'sttLang')));
     wc.appendChild(wtwo);
+    const micSel = selectOf([['', 'Standard von Windows']], draft.micId || '');
+    micSel.addEventListener('change', () => { draft.micId = micSel.value; });
+    const micRow = formRow('Mikrofon', micSel, 'Wähle hier Dein Mikrofon, falls beim Diktieren nichts oder nur „Musik“ erkannt wird.');
+    const micLvl = el('div', 'note', '');
+    micRow.appendChild(micLvl);
+    const micTest = el('button', 'btn small', 'Mikrofon testen (3 Sekunden)');
+    micTest.style.marginTop = '8px';
+    micRow.appendChild(micTest);
+    (async () => {
+      try {
+        const tmp = await navigator.mediaDevices.getUserMedia({ audio: true }); tmp.getTracks().forEach((t) => t.stop());
+        const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+        devs.forEach((d) => { const o = el('option', null, d.label || 'Mikrofon'); o.value = d.deviceId; micSel.appendChild(o); });
+        micSel.value = devs.some((d) => d.deviceId === draft.micId) ? draft.micId : '';
+      } catch (e) { micLvl.textContent = 'Kein Zugriff auf das Mikrofon: ' + (e.message || e); }
+    })();
+    micTest.onclick = async () => {
+      micTest.disabled = true; micLvl.textContent = 'Sprich jetzt …';
+      try {
+        const { startRecording } = await import('./audio.js');
+        const r = await startRecording({ deviceId: micSel.value });
+        setTimeout(() => r.stop(), 3000);
+        await r.done;
+        micLvl.textContent = r.peak < 0.006 ? 'Fast nur Stille. Falsches Mikrofon oder zu leise.' : `Signal da (Pegel ${Math.min(100, Math.round(r.peak * 400))} %). Das Mikrofon funktioniert.`;
+      } catch (e) { micLvl.textContent = 'Fehler: ' + (e.message || e); }
+      micTest.disabled = false;
+    };
+    wc.appendChild(micRow);
     const ready = !!(st.whisperBinary && st.whisperModels[wmodel]);
     const wrow = el('div', 'chips-row');
     wrow.style.alignItems = 'center';

@@ -264,7 +264,7 @@ function registerIpc() {
   ipcMain.handle('chats:delete', (_e, id) => store.deleteChat(id));
   ipcMain.handle('chats:clear', () => store.clearChats());
   ipcMain.handle('chats:export', async (_e, { title, markdown, format }) => {
-    const safe = (title || 'Dokument').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+    const safe = (title || 'Dokument').replace(/\.(png|jpe?g|gif|webp|bmp|pdf|docx?|md|txt)$/i, '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
     const all = {
       pdf: { name: 'PDF-Dokument', extensions: ['pdf'] },
       docx: { name: 'Word-Dokument', extensions: ['docx'] },
@@ -277,7 +277,8 @@ function registerIpc() {
       filters: order.map((k) => all[k]),
     });
     if (r.canceled || !r.filePath) return false;
-    const ext = path.extname(r.filePath).slice(1).toLowerCase();
+    let ext = path.extname(r.filePath).slice(1).toLowerCase();
+    if (!all[ext]) { ext = first; r.filePath += '.' + first; } // z. B. „.png“ im Namen: immer im gewählten Format speichern
     if (ext === 'pdf') fs.writeFileSync(r.filePath, await renderPdf(BrowserWindow, markdown, title));
     else if (ext === 'docx') fs.writeFileSync(r.filePath, buildDocx(markdown, title));
     else fs.writeFileSync(r.filePath, markdown, 'utf8');
