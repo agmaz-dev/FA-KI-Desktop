@@ -17,6 +17,7 @@ function encodeWav(samples, rate) {
   return buf;
 }
 
+let lastWavPeak = 0;
 async function blobToWav16k(blob) {
   const ctx = new AudioContext();
   const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
@@ -32,6 +33,7 @@ async function blobToWav16k(blob) {
   // Leise Aufnahmen anheben: Whisper erkennt sonst nur Stille („[Musik]“).
   let peak = 0;
   for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
+  lastWavPeak = peak;
   if (peak > 0.0005 && peak < 0.6) { const g = Math.min(40, 0.9 / peak); for (let i = 0; i < data.length; i++) data[i] *= g; }
   return encodeWav(data, rate);
 }
@@ -52,6 +54,7 @@ export async function startRecording({ vad = false, onLevel, deviceId = '' } = {
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
 
   const ac = new AudioContext();
+  try { await ac.resume(); } catch { /* egal */ } // ohne resume() liefert die Pegelmessung evtl. nur Nullen
   const an = ac.createAnalyser();
   an.fftSize = 1024;
   ac.createMediaStreamSource(stream).connect(an);
@@ -85,7 +88,7 @@ export async function startRecording({ vad = false, onLevel, deviceId = '' } = {
     stream.getTracks().forEach((t) => t.stop());
     ac.close().catch(() => {});
     if (cancelled || (vad && !spoke) || !chunks.length) return finish(null);
-    try { finish(await blobToWav16k(new Blob(chunks, { type: rec.mimeType }))); } catch { finish(null); }
+    try { const w = await blobToWav16k(new Blob(chunks, { type: rec.mimeType })); if (lastWavPeak > handle.peak) handle.peak = lastWavPeak; finish(w); } catch { finish(null); }
   };
   function stop() { if (rec.state !== 'inactive') rec.stop(); }
   function cancel() { cancelled = true; stop(); }
