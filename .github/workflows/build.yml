@@ -48,6 +48,7 @@ jobs:
           7z x -y llama-dl/*.zip -obuild-bundled/llama > /dev/null
           find build-bundled/llama -name llama-server.exe
           test -f build-bundled/llama/llama-server.exe
+          echo "$LLAMA_CPP_TAG" > build-bundled/llama/VERSION
       - run: npm ci
       - run: npm test
       - run: npm run dist

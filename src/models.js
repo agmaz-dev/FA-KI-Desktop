@@ -82,7 +82,21 @@ export function mountExplore(root, ctx) {
   const left = el('div', 'col-list');
   const right = el('div', 'col-detail');
   const listWrap = el('div', 'list-wrap'); listWrap.append(info, left);
-  cols.append(listWrap, right);
+  // Ziehbare Trennlinie: Breite der Liste wird gemerkt
+  let lw = 340;
+  try { lw = Math.min(720, Math.max(220, parseInt(localStorage.getItem('fa.exploreListW'), 10) || 340)); } catch { /* egal */ }
+  cols.style.gridTemplateColumns = `${lw}px 8px minmax(0, 1fr)`;
+  const split = el('div', 'splitter');
+  split.title = 'Ziehen, um die Breite zu ändern (Doppelklick: zurücksetzen)';
+  split.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); split.setPointerCapture(e.pointerId); split.classList.add('drag');
+    const x0 = e.clientX, w0 = lw;
+    const mv = (ev) => { lw = Math.min(Math.max(220, w0 + ev.clientX - x0), Math.max(260, cols.clientWidth - 320)); cols.style.gridTemplateColumns = `${lw}px 8px minmax(0, 1fr)`; };
+    const up = () => { split.classList.remove('drag'); split.removeEventListener('pointermove', mv); split.removeEventListener('pointerup', up); try { localStorage.setItem('fa.exploreListW', String(Math.round(lw))); } catch { /* egal */ } };
+    split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
+  });
+  split.addEventListener('dblclick', () => { lw = 340; cols.style.gridTemplateColumns = `${lw}px 8px minmax(0, 1fr)`; try { localStorage.removeItem('fa.exploreListW'); } catch { /* egal */ } });
+  cols.append(listWrap, split, right);
   page.appendChild(cols);
   root.appendChild(page);
 
@@ -110,7 +124,7 @@ export function mountExplore(root, ctx) {
     if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
     ctx.startPull(name);
   }
-  const offDl = ctx.dlOn(() => { const st = right.querySelector('.dl-status'); if (st) st.textContent = ctx.dl.state === 'idle' ? '' : ctx.dl.name.replace(/^hf\.co\//, '') + ': ' + ctx.dlText(); });
+  const offDl = ctx.dlOn(() => { const sb = right.querySelector('.dl-stop'); if (sb) sb.style.display = ctx.dl.state === 'running' ? '' : 'none'; const st = right.querySelector('.dl-status'); if (st) st.textContent = ctx.dl.state === 'idle' ? '' : ctx.dl.name.replace(/^hf\.co\//, '') + ': ' + ctx.dlText(); });
 
   async function openDetail(id, keepScroll) {
     selected = id;
@@ -158,7 +172,8 @@ export function mountExplore(root, ctx) {
         tbl.appendChild(row);
       }
       right.appendChild(tbl);
-      const stop = el('button', 'btn small', 'Download abbrechen');
+      const stop = el('button', 'btn small dl-stop', 'Download abbrechen');
+      stop.style.display = ctx.dl.state === 'running' ? '' : 'none';
       stop.onclick = () => ctx.dlCancel();
       right.append(status, stop);
     }

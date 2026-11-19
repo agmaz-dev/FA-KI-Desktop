@@ -11,6 +11,16 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.1.0
+
+- **Chat:** Gedanken und Werkzeug-Aktionen (z. B. GitHub lesen) sind eine kleine, zugeklappte Zeile; ein Klick klappt sie auf. Dunkler Anthrazit-Hintergrund. Rechtsklick ins Eingabefeld: „Einfügen“ und „Bild einfügen“ (kopiertes Bild aus der Zwischenablage).
+- **Seitenfenster neben dem Chat:** Links aus Antworten öffnen dort als Webseite, und was die KI als HTML schreibt (Webseite, Folien, Entwurf) erscheint sofort als Vorschau, mit Knopf „Als PDF speichern“. Breite ziehbar. Die Vorschau hat kein Netz, erstellte Seiten können nichts senden.
+- **Neue Struktur:** Links nur Chats, Modelle, Einstellungen. „Bibliothek“ und „Erkunden“ sind eine Seite „Modelle“ mit zwei Reitern. Die Trennlinie in der Suche ist ziehbar.
+- **Auslastung:** Balken für GPU, CPU und Arbeitsspeicher links unten (GPU über die Windows-Leistungsanzeige, ungefähr).
+- **Sprache:** Piper ist entfernt (Programm, Stimmen, Einstellungen). Vorlesen mit Supertonic oder „Meine Stimme“. Die Spracherkennung (Whisper, Standard Medium) hat einen eigenen, aufgeräumten Bereich.
+- **E-Mail für die KI** (Einstellungen → Internet und Agent): Posteingang lesen und suchen, Mails schreiben und senden. Jede Mail zum Senden siehst Du vorher mit Empfänger und Text und musst sie jedes Mal erlauben. Mailtexte gelten für die KI nur als Daten.
+- GitHub: die Repo-Liste zeigt jetzt bis zu 300 Repos, auch aus Organisationen. Die Engine-Version wird richtig angezeigt.
+
 ## Neu in 2.0.0 – eigene Engine, ohne Ollama
 
 - Die App bringt ihre Rechen-Engine (llama.cpp mit Vulkan, läuft auf AMD, NVIDIA und Intel) selbst mit. Ollama wird nicht mehr gebraucht und nicht mehr gestartet.

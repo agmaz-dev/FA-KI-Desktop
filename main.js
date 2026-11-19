@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage, nativeTheme, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Store, DEFAULT_SETTINGS } = require('./lib/store');
@@ -16,6 +16,9 @@ const tools = require('./lib/tools');
 const github = require('./lib/github');
 const agent = require('./lib/agent');
 const hf = require('./lib/hf');
+const { SysStats } = require('./lib/sysstats');
+const mail = require('./lib/mail');
+const { Panel } = require('./lib/panel');
 
 let win = null;
 let store = null;
@@ -24,6 +27,7 @@ const chatControllers = new Map();
 let pullController = null;
 let models = null;
 let engine = null;
+let panel = null;
 let ocrWorker = null;
 let voiceInst = null;
 let supertonic = null;
@@ -58,7 +62,10 @@ function createWindow() {
   win.webContents.on('context-menu', (_e, params) => {
     const items = [];
     if (params.isEditable) {
-      items.push({ label: 'Ausschneiden', role: 'cut', enabled: params.editFlags.canCut }, { label: 'Kopieren', role: 'copy', enabled: params.editFlags.canCopy }, { label: 'Einfügen', role: 'paste', enabled: params.editFlags.canPaste }, { type: 'separator' }, { label: 'Alles auswählen', role: 'selectAll' });
+      items.push({ label: 'Ausschneiden', role: 'cut', enabled: params.editFlags.canCut }, { label: 'Kopieren', role: 'copy', enabled: params.editFlags.canCopy }, { label: 'Einfügen', role: 'paste', enabled: params.editFlags.canPaste });
+      const img = clipboard.readImage();
+      if (!img.isEmpty()) items.push({ label: 'Bild einfügen', click: () => send('clip:image', img.toPNG()) });
+      items.push({ type: 'separator' }, { label: 'Alles auswählen', role: 'selectAll' });
     } else if (params.selectionText) {
       items.push({ label: 'Kopieren', role: 'copy' }, { label: 'Alles auswählen', role: 'selectAll' });
     }
@@ -100,29 +107,18 @@ if (!gotLock) {
     session.defaultSession.setPermissionCheckHandler((wc, permission) => permission === 'media');
 
     voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'oute_server.py'), (p) => send('voice:progress', p));
+    panel = new Panel(() => win, send);
     registerIpc();
     createWindow();
-    // Bevorzugte Piper-Stimme (Kerstin, dfki) still nachladen, falls sie fehlt oder nicht lesbar war
-    setTimeout(async () => {
-      try {
-        if (!speech.piperBin()) return;
-        // Nur wenn Piper wirklich spricht (Motor Piper, oder OuteTTS mit Piper für Türkisch/Rückfall).
-        // Bei Supertonic wird nichts im Hintergrund geladen.
-        const eng = store.getSettings().ttsEngine;
-        if (eng !== 'piper' && eng !== 'server') return;
-        for (const k of ['de', 'tr']) {
-          const iv = speech.installedVoice(k);
-          const want = VOICES[k].names[0];
-          if (!iv || !iv.id.split('-').includes(want)) await speech.prepareTts(k);
-        }
-      } catch { /* egal, dann bleibt die vorhandene Stimme */ }
-    }, 5000);
+    // Reste älterer Versionen (Piper-Programm und Piper-Stimmen) entfernen
+    for (const d of ['piper', 'voices']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
     // Spracherkennung vorwärmen: whisper-server lädt das Modell einmal und behält es im Speicher.
     setTimeout(() => { speech.warmStt(store.getSettings().sttModel); }, 3000);
     let st = store.getSettings();
-    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Piper
+    if (st.ttsEngine === 'piper') { store.setSettings({ ttsEngine: 'supertonic' }); st = store.getSettings(); }
+    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Supertonic
     if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
-      store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false, ttsServerCmd: '', ttsServerLangs: 'all' });
+      store.setSettings({ ttsEngine: 'supertonic', ttsServerAuto: false, ttsServerCmd: '', ttsServerLangs: 'all' });
       st = store.getSettings();
     }
     voiceInst.syncServer();
@@ -140,7 +136,7 @@ if (!gotLock) {
 }
 
 // Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
-const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc', 'agentDir', 'modelDir']);
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc', 'agentDir', 'modelDir', 'mailPasswordEnc']);
 
 // GitHub-Token: verschlüsselt (Windows-Anmeldedaten) im Hauptprozess; die Oberfläche sieht ihn nie.
 function getGithubToken() {
@@ -152,6 +148,19 @@ function getGithubToken() {
   } catch { /* nicht lesbar */ }
   return '';
 }
+function getMailPassword() {
+  const enc = store.getSettings().mailPasswordEnc || '';
+  try {
+    if (enc.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(enc.slice(4), 'base64'));
+    if (enc.startsWith('raw:')) return enc.slice(4);
+  } catch { /* nicht lesbar */ }
+  return '';
+}
+function setMailPassword(pw) {
+  let enc = '';
+  if (pw) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(pw).toString('base64') : 'raw:' + pw;
+  store.setSettings({ mailPasswordEnc: enc });
+}
 function setGithubToken(token) {
   let enc = '';
   if (token) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(token).toString('base64') : 'raw:' + token;
@@ -159,7 +168,7 @@ function setGithubToken(token) {
 }
 // Bestätigungen für Agent-Aktionen. „Immer erlauben“ gilt nur je Chat und Art, nie für Löschen und Zusammenführen.
 const autoAllow = new Map();
-const NEVER_AUTO = new Set(['datei-loeschen', 'github-merge']);
+const NEVER_AUTO = new Set(['datei-loeschen', 'github-merge', 'mail-senden']);
 async function confirmAction(chatId, req) {
   const set = autoAllow.get(chatId) || new Set();
   const canAuto = !NEVER_AUTO.has(req.kategorie);
@@ -179,8 +188,8 @@ async function confirmAction(chatId, req) {
 
 /** Einstellungen für die Oberfläche: ohne Token, mit Hinweis, ob einer da ist. */
 function publicSettings(s) {
-  const { githubTokenEnc, ...rest } = s;
-  return { ...rest, githubHasToken: !!githubTokenEnc };
+  const { githubTokenEnc, mailPasswordEnc, ...rest } = s;
+  return { ...rest, githubHasToken: !!githubTokenEnc, mailHasPassword: !!mailPasswordEnc };
 }
 /** Lässt aus der Oberfläche nur bekannte, unkritische Einstellungen durch. */
 function filterRendererSettings(patch) {
@@ -215,6 +224,16 @@ function registerIpc() {
     const t = getGithubToken();
     if (!t) return { ok: false, error: 'Kein Token gespeichert' };
     try { return { ok: true, login: await github.whoami(t) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('mail:setPassword', (_e, pw) => { setMailPassword(String(pw || '').trim()); return publicSettings(store.getSettings()); });
+  ipcMain.handle('mail:test', async (_e, cfgIn) => {
+    try {
+      const cfg = mail.configOf({ ...store.getSettings(), ...(cfgIn || {}) }, getMailPassword());
+      const r = await mail.listMail(cfg, { limit: 1 });
+      return { ok: true, count: r.length };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
   });
   ipcMain.handle('agent:pickDir', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Arbeitsordner für die KI wählen', properties: ['openDirectory', 'createDirectory'] });
@@ -271,6 +290,21 @@ function registerIpc() {
   });
 
   // ---------- Modelle und Engine (ohne Ollama) ----------
+  ipcMain.handle('panel:bounds', (_e, { rect, visible }) => { panel.setBounds(rect, visible); return true; });
+  ipcMain.handle('panel:openUrl', (_e, url) => { panel.openUrl(String(url)); return true; });
+  ipcMain.handle('panel:html', (_e, { html, title }) => { panel.showHtml(html, title); return true; });
+  ipcMain.handle('panel:nav', (_e, what) => { panel.nav(String(what)); return true; });
+  ipcMain.handle('panel:close', () => { panel.close(); return true; });
+  ipcMain.handle('panel:external', () => { const u = panel.currentUrl(); if (u) shell.openExternal(u); return true; });
+  ipcMain.handle('panel:pdf', async () => {
+    const data = await panel.pdf();
+    const r = await dialog.showSaveDialog(win, { defaultPath: (panel.title || 'Vorschau').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) + '.pdf', filters: [{ name: 'PDF-Dokument', extensions: ['pdf'] }] });
+    if (r.canceled || !r.filePath) return false;
+    fs.writeFileSync(r.filePath, data);
+    return r.filePath;
+  });
+  const sysStats = new SysStats();
+  ipcMain.handle('sys:stats', () => sysStats.sample());
   ipcMain.handle('models:status', async () => {
     if (!engine.available()) return { ok: false, error: 'Die Rechen-Engine (llama-server) fehlt in dieser Installation.' };
     return { ok: true, version: await engine.getVersion(), dir: models.dir() };
@@ -350,7 +384,7 @@ function registerIpc() {
         await tools.chatWithTools({
           chatStream: (b, cb, sig) => engine.chatStream(b, cb, sig),
           body, tools: toolList, signal: ctrl.signal, onObj,
-          ctx: { getToken: getGithubToken, agentDir: store.getSettings().agentDir, confirm: (req) => confirmAction(String(chatId || id), req) },
+          ctx: { getToken: getGithubToken, mailSettings: store.getSettings(), getMailPassword, agentDir: store.getSettings().agentDir, confirm: (req) => confirmAction(String(chatId || id), req) },
           onTool: ({ label }) => send('chat:tool', { id, label }),
         });
       } else {
@@ -377,15 +411,13 @@ function registerIpc() {
   // ---------- Sprache ----------
   ipcMain.handle('speech:status', () => ({ ...speech.status(), supertonic: supertonic.status() }));
   ipcMain.handle('speech:prepareStt', (_e, model) => speech.prepareStt(model));
-  ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
   ipcMain.handle('speech:warmStt', (_e, model) => speech.warmStt(model || store.getSettings().sttModel));
-  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed, piper }) => {
+  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => {
     const s = store.getSettings();
-    if (!piper && s.ttsEngine === 'supertonic') return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
-    if (!piper && s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
-    return speech.synthesize(text, voice, speed);
+    if (s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
+    return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
   });
   ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); supertonic.cancel(); return true; });
   ipcMain.handle('supertonic:setup', async () => {
@@ -474,7 +506,7 @@ function registerIpc() {
         await procs.stop('tts');
         await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
         if (/oute_server\.py/.test(before.ttsServerCmd || '')) { apply(before.ttsServerCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
-        else store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false });
+        else store.setSettings({ ttsEngine: 'supertonic', ttsServerAuto: false });
         throw e;
       }
     } catch (e) {

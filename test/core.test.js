@@ -78,7 +78,7 @@ test('Downloader', async () => {
   srv.close();
 });
 
-test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
+test('Stimmen-Server (OpenAI-kompatibel)', async () => {
   const { SpeechManager } = require('../lib/speech');
   let got = null;
   const srv = http.createServer((req, res) => {
@@ -99,12 +99,6 @@ test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
   const v = await sm.serverVoices(url);
   assert.ok(v.ok); assert.deepStrictEqual(v.voices, ['anna.wav', 'ben.wav']);
   srv.close();
-  fs.mkdirSync(sm.voiceDir, { recursive: true });
-  for (const id of ['tr_TR-fettah-medium', 'tr_TR-dfki-medium', 'de_DE-thorsten-medium', 'de_DE-thorsten-high']) {
-    fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx'), 'x'); fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx.json'), '{}');
-  }
-  assert.strictEqual(sm.installedVoice('tr').id, 'tr_TR-dfki-medium');
-  assert.strictEqual(sm.installedVoice('de').id, 'de_DE-thorsten-high');
 });
 
 test('Word-Export erzeugt gültiges DOCX-Paket', () => {
@@ -117,13 +111,6 @@ test('Word-Export erzeugt gültiges DOCX-Paket', () => {
   assert.match(xml, /Heading1/);
   assert.match(xml, /&lt;b&gt;/);
   assert.ok(!/<b>x/.test(xml));
-});
-
-test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
-  const { VOICES } = require('../lib/speech');
-  assert.strictEqual(VOICES.de.names[0], 'kerstin');
-  assert.deepStrictEqual(VOICES.de.names, ['kerstin']);
-  assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
 
 test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
@@ -143,20 +130,6 @@ test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
   assert.strictEqual(v.status().oldFiles, true);
   assert.strictEqual(v.cleanOld(), 2);
   assert.strictEqual(v.status().oldFiles, false);
-});
-
-test('Piper: zu neue Stimmen (Mehrzeichen-Laute) werden übersprungen', () => {
-  const fs = require('fs'); const os = require('os'); const path = require('path');
-  const { SpeechManager } = require('../lib/speech');
-  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-pv-'));
-  const vd = path.join(ud, 'voices'); fs.mkdirSync(vd, { recursive: true });
-  const put = (id, map) => { fs.writeFileSync(path.join(vd, id + '.onnx'), 'x'); fs.writeFileSync(path.join(vd, id + '.onnx.json'), JSON.stringify({ phoneme_id_map: map })); };
-  put('de_DE-kerstin-medium', { a: [1], 'aɪ': [161] });
-  put('de_DE-pavoque-low', { a: [1], b: [2] });
-  const s = new SpeechManager(ud, () => {}, ud);
-  assert.strictEqual(s.installedVoice('de').id, 'de_DE-pavoque-low');
-  put('de_DE-kerstin-low', { a: [1], b: [2] });
-  assert.strictEqual(s.installedVoice('de').id, 'de_DE-kerstin-low');
 });
 
 test('Supertonic: Text, Teilstücke, WAV', () => {

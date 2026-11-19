@@ -73,6 +73,84 @@ api.speech.onProgress((p) => {
   showProgress((p.label || 'Download') + extra, p.pct);
 });
 
+// ---------- Seitenfenster: Browser und Vorschau neben dem Chat ----------
+const panelSt = { open: false, mode: '', canBack: false, canForward: false };
+function panelWidth() {
+  let w = 520;
+  try { w = parseInt(localStorage.getItem('fa.panelW'), 10) || 520; } catch { /* egal */ }
+  return Math.min(Math.max(w, 320), Math.max(360, window.innerWidth - 560));
+}
+function panelSync() {
+  const chat = !$('viewChat').classList.contains('hidden');
+  const show = panelSt.open && chat;
+  $('panel').classList.toggle('hidden', !show);
+  $('panelSplit').classList.toggle('hidden', !show);
+  if (show) $('panel').style.setProperty('--panelw', panelWidth() + 'px');
+  const r = $('panelBody').getBoundingClientRect();
+  api.panel.bounds({ rect: { x: r.x, y: r.y, width: r.width, height: r.height }, visible: show });
+}
+function panelShow() { panelSt.open = true; panelSync(); requestAnimationFrame(panelSync); }
+async function openPanelUrl(url) { panelShow(); try { await api.panel.openUrl(url); } catch (e) { hint(cleanErr(e), 0); } }
+async function openPanelHtml(html, title) { panelShow(); try { await api.panel.html({ html, title }); } catch (e) { hint(cleanErr(e), 0); } }
+function cleanErr(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+/** Holt ein vollständiges HTML-Dokument aus einer Antwort (```html-Block oder Dokument im Codeblock). */
+function extractHtml(md) {
+  const re = /```[a-zA-Z]*\s*\n([\s\S]*?)```/g;
+  let m; let best = '';
+  while ((m = re.exec(md || ''))) if (/^\s*(<!doctype html|<html)/i.test(m[1])) best = m[1];
+  return best;
+}
+function initPanel() {
+  api.panel.onState((s) => {
+    panelSt.open = !!s.open; panelSt.mode = s.mode || ''; panelSt.canBack = !!s.canBack; panelSt.canForward = !!s.canForward;
+    $('pTitle').textContent = s.open ? (s.url || s.title || '') : '';
+    $('pBack').disabled = !s.canBack; $('pFwd').disabled = !s.canForward;
+    $('pReload').classList.toggle('hidden', s.mode === 'html');
+    $('pBack').classList.toggle('hidden', s.mode === 'html'); $('pFwd').classList.toggle('hidden', s.mode === 'html');
+    $('pExt').classList.toggle('hidden', s.mode === 'html');
+    panelSync();
+  });
+  $('pBack').onclick = () => api.panel.nav('back');
+  $('pFwd').onclick = () => api.panel.nav('forward');
+  $('pReload').onclick = () => api.panel.nav('reload');
+  $('pExt').onclick = () => api.panel.external();
+  $('pClose').onclick = () => { panelSt.open = false; api.panel.close(); panelSync(); };
+  $('pPdf').onclick = async () => { try { const p = await api.panel.pdf(); if (p) hint('Gespeichert: ' + p); } catch (e) { hint(cleanErr(e), 0); } };
+  const split = $('panelSplit');
+  split.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); split.setPointerCapture(e.pointerId); split.classList.add('drag');
+    const x0 = e.clientX; const w0 = panelWidth();
+    const mv = (ev) => {
+      const w = Math.min(Math.max(w0 + (x0 - ev.clientX), 320), Math.max(360, window.innerWidth - 560));
+      $('panel').style.setProperty('--panelw', w + 'px');
+      try { localStorage.setItem('fa.panelW', String(Math.round(w))); } catch { /* egal */ }
+      panelSync();
+    };
+    const up = () => { split.classList.remove('drag'); split.removeEventListener('pointermove', mv); split.removeEventListener('pointerup', up); };
+    split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
+  });
+  new ResizeObserver(panelSync).observe($('panelBody'));
+  window.addEventListener('resize', panelSync);
+}
+
+// ---------- Auslastung (GPU, CPU, RAM) ----------
+function setMeter(id, pct, text) {
+  $('m' + id).style.width = (pct == null ? 0 : pct) + '%';
+  $('m' + id + 'T').textContent = text;
+}
+function startMeters() {
+  const tick = async () => {
+    try {
+      const s = await api.sys.stats();
+      setMeter('Gpu', s.gpu, s.gpu == null ? '–' : s.gpu + ' %');
+      setMeter('Cpu', s.cpu, s.cpu + ' %');
+      setMeter('Ram', Math.round((s.ramUsed / s.ramTotal) * 100), formatBytes(s.ramUsed));
+    } catch { /* egal */ }
+  };
+  tick();
+  setInterval(tick, 2000);
+}
+
 // ---------- Status & Modelle ----------
 async function refreshStatus() {
   const s = await api.models.status();
@@ -301,7 +379,7 @@ function fillMsg(wrap, m, live = false, isLast = false) {
     const open = wrap._thinkOpen !== undefined ? wrap._thinkOpen : !!(live && state.settings.thinkLive);
     d.open = open;
     d.addEventListener('toggle', () => { wrap._thinkOpen = d.open; });
-    let label = 'Gedankengang anzeigen';
+    let label = 'Gedanken';
     if (live && !m.content) {
       if (!m._t0) m._t0 = Date.now();
       label = `Denkt nach … (${Math.round((Date.now() - m._t0) / 1000)} s)`;
@@ -313,8 +391,9 @@ function fillMsg(wrap, m, live = false, isLast = false) {
     if (open && live) requestAnimationFrame(() => { tt.scrollTop = tt.scrollHeight; });
   }
   if (m.tools && m.tools.length) {
-    const tl = el('div', 'chips');
-    for (const t of m.tools) { const c = el('span', 'chip'); c.appendChild(document.createTextNode(t)); tl.appendChild(c); }
+    const tl = el('details', 'think toolfold');
+    tl.appendChild(el('summary', null, m.tools.length === 1 ? '1 Werkzeug-Aktion' : m.tools.length + ' Werkzeug-Aktionen'));
+    tl.appendChild(el('div', 'tt', m.tools.join('\n')));
     body.appendChild(tl);
   }
   const md = el('div', 'md');
@@ -326,8 +405,19 @@ function fillMsg(wrap, m, live = false, isLast = false) {
       b.textContent = 'Kopiert ✓'; setTimeout(() => { b.textContent = 'Kopieren'; }, 1500);
     };
     pre.appendChild(b);
+    const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+    if (/^\s*(<!doctype html|<html)/i.test(code)) {
+      const pv = el('button', 'copybtn prevbtn', 'Vorschau');
+      pv.onclick = () => openPanelHtml(code, 'Vorschau');
+      pre.appendChild(pv);
+    }
   });
-  md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
+  md.querySelectorAll('a').forEach((a) => {
+    a.target = '_blank'; a.rel = 'noreferrer';
+    a.addEventListener('click', (e) => {
+      if (/^https?:\/\//i.test(a.href) && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); openPanelUrl(a.href); }
+    });
+  });
   body.appendChild(md);
   if (m.error) body.appendChild(el('div', 'err', m.error));
   if (m.stats && m.stats.evalCount && m.stats.evalDuration) {
@@ -362,6 +452,7 @@ function setBusy(on) {
 function systemText() {
   const s = state.settings;
   const parts = ['Du bist "FA KI", der persönliche KI-Assistent in der Desktop-App "FA KI Desktop". Du läufst lokal auf dem Computer des Nutzers; seine Daten verlassen den Computer nicht. Wenn jemand fragt, wer du bist, sage das und nenne dich nicht ChatGPT, Claude oder anders.'];
+  parts.push('Soll etwas gezeigt werden (Webseite, Folien, Grafik, Tabelle, Entwurf), schreibe ein vollständiges, eigenständiges HTML-Dokument in genau einem ```html-Block: alles inline (CSS und JavaScript im Dokument), keine Bilder oder Dateien aus dem Internet. Es erscheint sofort als Vorschau rechts neben dem Chat. Folien: jede Folie ein <section> in 16:9 (1280×720), @page{size:1280px 720px;margin:0}, page-break-after:always, Wechsel mit den Pfeiltasten. Danach höchstens zwei Sätze Erklärung.');
   if (s.systemPrompt && s.systemPrompt.trim()) parts.push(s.systemPrompt.trim());
   const pp = profilePrompt(activeProfile());
   if (pp) parts.push(pp);
@@ -403,7 +494,7 @@ async function send() {
   const text = $('input').value.trim();
   if (!text && !state.pending.length) return;
   const model = $('modelSel').value;
-  if (!model) { hint('Bitte zuerst ein Modell laden (Einstellungen → Erkunden).'); return showView('settings', 'explore'); }
+  if (!model) { hint('Bitte zuerst ein Modell laden (Modelle).'); return showView('settings', 'explore'); }
   if (!(await refreshStatus())) return;
   stopAllSpeech();
   if (!state.chat) state.chat = newChat();
@@ -519,6 +610,7 @@ async function finishStream(id, extra) {
   if (!s.asst.content && !s.asst.thinking && !s.asst.error) s.asst.content = '_(keine Antwort erhalten)_';
   state.chat.updated = Date.now();
   fillMsg(s.wrap, s.asst, false, true);
+  if (s.asst.content && !s.asst.error && !(extra && extra.aborted)) { const h = extractHtml(s.asst.content); if (h) openPanelHtml(h, 'Vorschau'); }
   updateCtxInfo();
   await api.chats.save(state.chat);
   await refreshChats();
@@ -537,9 +629,8 @@ async function speakNow(text, settingsOverride) {
       voicePref: s.ttsVoice,
       speechStatus: state.speechStatus,
       speed: s.ttsSpeed || 1,
-      engine: s.ttsEngine || 'piper',
-      serverLangs: s.ttsEngine === 'supertonic' ? 'all' : (s.ttsServerLangs || 'all'),
-      onWarn: (m) => hint((s.ttsEngine === 'supertonic' ? 'Supertonic ist gerade nicht bereit' : 'Meine Stimme (OuteTTS) ist gerade nicht bereit') + ', es spricht Piper bzw. die Windows-Stimme: ' + m, 0),
+      engine: s.ttsEngine === 'server' ? 'server' : 'supertonic',
+      onWarn: (m) => hint((s.ttsEngine === 'supertonic' ? 'Supertonic ist gerade nicht bereit' : 'Meine Stimme (OuteTTS) ist gerade nicht bereit') + ', es spricht die Windows-Stimme: ' + m, 0),
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
@@ -759,7 +850,10 @@ function showView(name, tab) {
   const chat = name === 'chat';
   $('viewChat').classList.toggle('hidden', !chat);
   $('viewPage').className = 'view' + (chat ? ' hidden' : ' page-' + name);
-  $('btnSettings').classList.toggle('active', !chat);
+  $('btnSettings').classList.toggle('active', !chat && !/^(library|explore)$/.test(tab || ''));
+  setTimeout(panelSync, 0);
+  $('navChats').classList.toggle('active', chat);
+  $('navModels').classList.toggle('active', !chat && /^(library|explore)$/.test(tab || ''));
   $('app').classList.toggle('in-settings', !chat);
   if (chat) { $('input').focus(); return; }
   showSettings(tab || 'general');
@@ -872,6 +966,10 @@ function wire() {
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);
   $('btnSettings').onclick = () => showView('settings');
+  $('navChats').onclick = () => showView('chat');
+  $('navModels').onclick = () => showView('settings', 'library');
+  startMeters();
+  initPanel();
   $('btnPlus').onclick = (e) => { e.stopPropagation(); toggleMenu('plusMenu'); };
   $('modelBtn').onclick = (e) => { e.stopPropagation(); toggleMenu('modelMenu'); };
   $('modelFilter').addEventListener('input', renderModelMenu);
@@ -910,6 +1008,7 @@ function wire() {
     e.preventDefault();
     for (const f of e.dataTransfer.files) await addFile(f.name, new Uint8Array(await f.arrayBuffer()));
   });
+  api.app.onClipImage((png) => addFile('Bild-' + Date.now() + '.png', new Uint8Array(png)));
   $('input').addEventListener('paste', async (e) => {
     const items = Array.from(e.clipboardData.items);
     // Enthält die Zwischenablage auch Text (z. B. aus Word oder Webseiten), wird ganz normal Text eingefügt.

@@ -16,12 +16,15 @@ contextBridge.exposeInMainWorld('api', {
   },
   app: {
     info: inv('app:info'), openDataDir: inv('app:openDataDir'), pickFolder: inv('dialog:pickFolder'),
-    onTtsStart: on('app:ttsStart'),
+    onTtsStart: on('app:ttsStart'), onClipImage: on('clip:image'),
   },
   files: { pick: inv('files:pick') },
+  mail: { setPassword: inv('mail:setPassword'), test: inv('mail:test') },
   github: { setToken: inv('github:setToken'), test: inv('github:test') },
   agent: { pickDir: inv('agent:pickDir'), clearDir: inv('agent:clearDir'), check: inv('agent:check'), openDir: inv('agent:openDir') },
   hf: { search: inv('hf:search'), details: inv('hf:details'), translate: inv('hf:translate') },
+  panel: { bounds: inv('panel:bounds'), openUrl: inv('panel:openUrl'), html: inv('panel:html'), nav: inv('panel:nav'), close: inv('panel:close'), external: inv('panel:external'), pdf: inv('panel:pdf'), onState: on('panel:state') },
+  sys: { stats: inv('sys:stats') },
   models: {
     status: inv('models:status'), list: inv('models:list'), show: inv('models:show'), remove: inv('models:remove'),
     download: inv('models:download'), cancel: inv('models:cancelDownload'), unload: inv('models:unload'),

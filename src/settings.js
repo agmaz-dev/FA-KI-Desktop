@@ -4,10 +4,10 @@ import { el, $, icon, formRow, selectOf, input, textarea, switchRow, newId } fro
 const GROUPS = [
   ['App', [['general', 'Allgemein', 'gear'], ['profiles', 'Profile', 'user']]],
   ['Assistent', [['tools', 'Internet und Agent', 'globe'], ['speech', 'Sprache', 'speaker']]],
-  ['Lokale Modelle', [['explore', 'Erkunden', 'compass'], ['library', 'Bibliothek', 'library'], ['ai', 'Standardwerte für lokale Modelle', 'sliders']]],
+  ['Lokale Modelle', [['library', 'Modelle', 'library'], ['ai', 'Standardwerte für lokale Modelle', 'sliders']]],
   ['System', [['data', 'Daten und Info', 'download']]],
 ];
-const TAB_TITLE = Object.fromEntries(GROUPS.flatMap(([, items]) => items.map(([id, label]) => [id, label])));
+const TAB_TITLE = { ...Object.fromEntries(GROUPS.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), explore: 'Modelle', library: 'Modelle' };
 
 export const PROFILE_FIELDS = [
   ['fullName', 'Vollständiger Name'],
@@ -80,7 +80,7 @@ export async function openSettings(ctx, startTab = 'general') {
       for (const [group, items] of GROUPS) {
         nav.appendChild(el('div', 'nav-group', group));
         for (const [id, label, ic] of items) {
-          const b = el('button', id === tab ? 'active' : '');
+          const b = el('button', id === tab || (id === 'library' && tab === 'explore') ? 'active' : '');
           b.innerHTML = icon(ic, 17) + '<span>' + label + '</span>';
           b.onclick = () => go(id);
           nav.appendChild(b);
@@ -116,8 +116,18 @@ export async function openSettings(ctx, startTab = 'general') {
       if (!isModels) main.appendChild(foot);
       m.append(nav, main);
 
-      if (tab === 'explore') ctx.explore(body);
-      else if (tab === 'library') ctx.library(body);
+      if (isModels) {
+        const strip = el('div', 'seg-tabs');
+        for (const [id, label] of [['library', 'Meine Modelle'], ['explore', 'Auf Hugging Face suchen']]) {
+          const b = el('button', id === tab ? 'active' : '', label);
+          b.onclick = () => go(id);
+          strip.appendChild(b);
+        }
+        body.appendChild(strip);
+        const mroot = el('div', 'models-root');
+        body.appendChild(mroot);
+        if (tab === 'explore') ctx.explore(mroot); else ctx.library(mroot);
+      }
       else ({ general, ai, tools, profiles, speech, data })[tab](body, st);
     });
   }
@@ -231,6 +241,54 @@ export async function openSettings(ctx, startTab = 'general') {
     row.append(saveTok, delTok);
     body.appendChild(row);
     body.appendChild(tstat);
+
+    // ----- E-Mail -----
+    body.appendChild(el('h3', null, 'E-Mail'));
+    body.lastChild.style.margin = '26px 0 8px';
+    const mt = switchRow('KI darf meine E-Mails lesen und (mit Bestätigung) senden', 'Lesen und Suchen im Posteingang geht ohne Nachfrage. Jede Mail zum Senden siehst Du vorher mit Empfänger und Text und musst sie jedes Mal erlauben. Anhänge werden nicht gelesen. Mailtexte sind für die KI nur Daten, keine Anweisungen.', draft.mailTools === true);
+    bind(mt.cb, 'mailTools');
+    body.appendChild(mt.row);
+    const prov = selectOf([['', 'Anbieter wählen …'], ['gmail', 'Gmail'], ['icloud', 'iCloud'], ['outlook', 'Outlook / Microsoft'], ['gmx', 'GMX'], ['webde', 'web.de'], ['own', 'Eigener Server']], '');
+    const PRE = { gmail: ['imap.gmail.com', 993, 'smtp.gmail.com', 465], icloud: ['imap.mail.me.com', 993, 'smtp.mail.me.com', 587], outlook: ['outlook.office365.com', 993, 'smtp-mail.outlook.com', 587], gmx: ['imap.gmx.net', 993, 'mail.gmx.net', 587], webde: ['imap.web.de', 993, 'smtp.web.de', 587] };
+    const fImap = bind(input('text', draft.mailImapHost), 'mailImapHost');
+    const fImapP = bind(input('number', draft.mailImapPort, { min: 1, max: 65535 }), 'mailImapPort', (v) => parseInt(v, 10) || 993);
+    const fSmtp = bind(input('text', draft.mailSmtpHost), 'mailSmtpHost');
+    const fSmtpP = bind(input('number', draft.mailSmtpPort, { min: 1, max: 65535 }), 'mailSmtpPort', (v) => parseInt(v, 10) || 465);
+    prov.addEventListener('change', () => {
+      const p = PRE[prov.value]; if (!p) return;
+      fImap.value = p[0]; fImapP.value = p[1]; fSmtp.value = p[2]; fSmtpP.value = p[3];
+      for (const [c, k, v] of [[fImap, 'mailImapHost', p[0]], [fImapP, 'mailImapPort', p[1]], [fSmtp, 'mailSmtpHost', p[2]], [fSmtpP, 'mailSmtpPort', p[3]]]) draft[k] = v;
+    });
+    body.appendChild(formRow('Anbieter', prov, 'Füllt die Serverangaben aus. Gmail, iCloud und Outlook brauchen ein App-Passwort (nicht Dein normales Passwort).'));
+    const mtwo = el('div', 'two');
+    mtwo.appendChild(formRow('E-Mail-Adresse (Anmeldename)', bind(input('text', draft.mailUser), 'mailUser')));
+    mtwo.appendChild(formRow('Absender (optional)', bind(input('text', draft.mailFrom), 'mailFrom'), 'z. B. Feridun Agmaz <name@example.de>'));
+    body.appendChild(mtwo);
+    const m2 = el('div', 'two');
+    m2.appendChild(formRow('Server zum Lesen (IMAP)', fImap));
+    m2.appendChild(formRow('Port', fImapP));
+    body.appendChild(m2);
+    const m3 = el('div', 'two');
+    m3.appendChild(formRow('Server zum Senden (SMTP)', fSmtp));
+    m3.appendChild(formRow('Port', fSmtpP, '465 oder 587'));
+    body.appendChild(m3);
+    const mpw = input('password', '', { placeholder: draft.mailHasPassword ? 'Passwort ist gespeichert (zum Ersetzen neues eintragen)' : 'App-Passwort einfügen', autocomplete: 'off' });
+    body.appendChild(formRow('App-Passwort', mpw, 'Wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben.'));
+    const mrow = el('div', 'chips-row');
+    const mstat = el('div', 'note', '');
+    const msave = el('button', 'btn small primary', 'Speichern und testen');
+    msave.onclick = async () => {
+      mstat.textContent = 'Prüfe Anmeldung …';
+      await api.settings.set({ mailUser: draft.mailUser, mailFrom: draft.mailFrom, mailImapHost: draft.mailImapHost, mailImapPort: draft.mailImapPort, mailSmtpHost: draft.mailSmtpHost, mailSmtpPort: draft.mailSmtpPort });
+      if (mpw.value.trim()) { await api.mail.setPassword(mpw.value.trim()); mpw.value = ''; draft.mailHasPassword = true; }
+      const r = await api.mail.test();
+      mstat.textContent = r.ok ? 'Anmeldung klappt. Du kannst die KI jetzt nach Deinen Mails fragen (Schalter oben aktivieren und unten auf „Speichern“).' : 'Nicht angemeldet: ' + r.error;
+    };
+    const mdel = el('button', 'btn small', 'Passwort entfernen');
+    mdel.onclick = async () => { await api.mail.setPassword(''); draft.mailHasPassword = false; mstat.textContent = 'Passwort entfernt.'; };
+    mrow.append(msave, mdel);
+    body.appendChild(mrow);
+    body.appendChild(mstat);
   }
 
   // ---------- Profile ----------
@@ -337,7 +395,7 @@ export async function openSettings(ctx, startTab = 'general') {
       if (r.ok) {
         Object.assign(draft, r.settings);
         ST.done = `Fertig. Erster Testsatz: ${Number(r.seconds).toFixed(1).replace('.', ',')} s. Supertonic ist jetzt aktiv, Tempo auf 1× gestellt. Klick unten auf „Speichern“.`;
-      } else ST.done = 'Fehler: ' + r.error + ' Es spricht weiter Piper.';
+      } else ST.done = 'Fehler: ' + r.error + ' Es spricht die Windows-Stimme.';
       render();
     };
     const stRow = el('div', 'chips-row'); stRow.append(stBtn, stCancel);
@@ -346,7 +404,7 @@ export async function openSettings(ctx, startTab = 'general') {
     body.appendChild(stc);
     const vc = el('div', 'voice-card');
     vc.appendChild(el('h3', null, 'Meine Stimme (OuteTTS, Deutsch)'));
-    vc.appendChild(el('div', 'note', 'Klingt nach Deiner Aufnahme und läuft ganz auf diesem PC. Die Einrichtung ist einmalig (mehrere GB Download). Türkisch spricht Piper.'));
+    vc.appendChild(el('div', 'note', 'Klingt nach Deiner Aufnahme und läuft ganz auf diesem PC. Die Einrichtung ist einmalig (mehrere GB Download). Türkisch spricht Supertonic.'));
     const sInfo = el('div', 'note', draft.ttsSampleFile ? 'Stimmprobe: ' + draft.ttsSampleFile : 'Noch keine Stimmprobe gewählt. Eine saubere Aufnahme von 10 bis 18 Sekunden (WAV) genügt.');
     const bSample = el('button', 'btn small', 'Aufnahme wählen …');
     bSample.onclick = async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sInfo.textContent = 'Stimmprobe: ' + r.name; } };
@@ -374,7 +432,7 @@ export async function openSettings(ctx, startTab = 'general') {
       const f = (x) => Number(x).toFixed(1).replace('.', ',');
       if (r.settings) Object.assign(draft, { ttsEngine: r.settings.ttsEngine, ttsServerUrl: r.settings.ttsServerUrl, ttsServerDir: r.settings.ttsServerDir, ttsServerCmd: r.settings.ttsServerCmd, ttsServerAuto: r.settings.ttsServerAuto, ttsServerModel: r.settings.ttsServerModel, ttsServerLangs: r.settings.ttsServerLangs });
       if (r.ok) VU.done = `Fertig (${r.device}). Erster Testsatz: ${f(r.cold)} s, zweiter: ${f(r.seconds)} s. Klick unten auf „Speichern“.`;
-      else VU.done = 'Fehler: ' + r.error + ' Es spricht weiter Piper.';
+      else VU.done = 'Fehler: ' + r.error + ' Es spricht die Windows-Stimme.';
       render();
     };
     bOute.onclick = runSetup;
@@ -388,7 +446,7 @@ export async function openSettings(ctx, startTab = 'general') {
     }
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
     body.appendChild(vc);
-    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['piper', 'Piper (schnell: deutsche Frauenstimme, türkische Stimme)'], ['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Piper automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
+    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine === 'server' ? 'server' : 'supertonic'), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Supertonic automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');
@@ -396,39 +454,39 @@ export async function openSettings(ctx, startTab = 'general') {
     const tr = el('div', 'chips-row'); tr.append(test, stopT);
     body.appendChild(tr);
 
-    body.appendChild(el('h3', null, 'Spracheingabe'));
-    const two = el('div', 'two');
-    two.appendChild(formRow('Sprache beim Diktieren', bind(selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], draft.sttLang), 'sttLang')));
-    two.appendChild(formRow('Genauigkeit', bind(selectOf([['base', 'Schnell (base)'], ['small', 'Ausgewogen (small)'], ['medium', 'Genau (medium)']], draft.sttModel), 'sttModel')));
-    body.appendChild(two);
+    // ----- Spracherkennung (Whisper) -----
+    body.appendChild(el('h3', null, 'Spracherkennung (Whisper)'));
+    const wc = el('div', 'voice-card');
+    wc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:6px 0 16px';
+    wc.appendChild(el('div', 'note', 'Wandelt Gesprochenes in Text um, für das Diktieren und den Gesprächsmodus. Läuft ganz auf diesem PC. Der Bildschirm bleibt dabei bedienbar.'));
+    const wmodel = draft.sttModel in st.info.whisperModels ? draft.sttModel : 'medium';
+    const names = { base: 'Schnell', small: 'Ausgewogen', medium: 'Genau' };
+    const wsel = selectOf(Object.keys(st.info.whisperModels).map((k) => [k, `${k[0].toUpperCase() + k.slice(1)} · ${names[k] || ''} (${st.info.whisperModels[k].approx})${st.whisperModels[k] ? ' – geladen' : ''}`]), wmodel);
+    wsel.addEventListener('change', () => { draft.sttModel = wsel.value; render(); });
+    const wtwo = el('div', 'two');
+    wtwo.appendChild(formRow('Modell', wsel, 'Medium ist am genauesten, besonders bei Türkisch und Dialekt.'));
+    wtwo.appendChild(formRow('Sprache beim Diktieren', bind(selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], draft.sttLang), 'sttLang')));
+    wc.appendChild(wtwo);
+    const ready = !!(st.whisperBinary && st.whisperModels[wmodel]);
+    const wrow = el('div', 'chips-row');
+    wrow.style.alignItems = 'center';
+    wrow.appendChild(el('span', 'badge ' + (ready ? 'ok' : 'warn'), ready ? 'bereit' : 'fehlt'));
+    const wb = el('button', 'btn small' + (ready ? '' : ' primary'), ready ? 'Neu laden' : 'Einrichten');
+    wb.onclick = async () => {
+      wb.disabled = true;
+      try { await api.speech.prepareStt(wmodel); ctx.hideProgress(); ctx.hint('Fertig: Spracherkennung (' + wmodel + ')', 5000); }
+      catch (e) { ctx.hideProgress(); ctx.hint('Spracherkennung: ' + (e.message || e), 0); }
+      render();
+    };
+    wrow.appendChild(wb);
+    wc.appendChild(wrow);
+    body.appendChild(wc);
     const as = switchRow('Diktierten Text sofort senden', 'Aus: der Text erscheint zuerst im Eingabefeld.', draft.autoSend);
     bind(as.cb, 'autoSend');
     body.appendChild(as.row);
     const ta = switchRow('Antworten automatisch vorlesen', 'Auch über das Lautsprecher-Symbol unter dem Eingabefeld schaltbar.', draft.ttsAuto);
     bind(ta.cb, 'ttsAuto');
     body.appendChild(ta.row);
-
-    body.appendChild(el('h3', null, 'Lokale Sprach-Bausteine'));
-    const mkRow = (title, ok, sub, btnText, fn) => {
-      const r = el('div', 'list-row');
-      const g = el('div', 'grow'); g.appendChild(el('div', null, title)); g.appendChild(el('div', 'sub', sub));
-      r.appendChild(g);
-      r.appendChild(el('span', 'badge ' + (ok ? 'ok' : 'warn'), ok ? 'bereit' : 'fehlt'));
-      const b = el('button', 'btn small', ok ? 'Neu laden' : btnText);
-      b.onclick = async () => {
-        b.disabled = true;
-        try { await fn(); ctx.hideProgress(); ctx.hint('Fertig: ' + title, 5000); }
-        catch (e) { ctx.hideProgress(); ctx.hint(title + ': ' + (e.message || e), 0); }
-        render();
-      };
-      r.appendChild(b);
-      return r;
-    };
-    const model = draft.sttModel;
-    body.appendChild(mkRow('Spracherkennung (Whisper, Modell „' + model + '“)', st.whisperBinary && st.whisperModels[model], 'ca. ' + st.info.whisperModels[model].approx + ' – für Diktieren und Gesprächsmodus', 'Einrichten', () => api.speech.prepareStt(model)));
-    for (const k of ['de', 'tr']) {
-      body.appendChild(mkRow('Piper-Stimme: ' + st.info.voices[k].label, st.piperBinary && st.voices[k], 'ca. ' + st.info.voices[k].approx + ' – klingt natürlicher als die Windows-Stimme', 'Laden', () => api.speech.prepareTts(k)));
-    }
   }
 
   // ---------- Daten ----------

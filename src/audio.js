@@ -162,7 +162,7 @@ function playBytes(bytes, token) {
 
 /**
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
- * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
+ * Nutzt Supertonic bzw. „Meine Stimme“ (lokal), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
 /** Schneidet den ersten Satz an einem Komma kurz, damit die Stimme früher anfängt. */
 function shortFirst(sentences) {
@@ -175,7 +175,7 @@ function shortFirst(sentences) {
   return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
 }
 
-export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', serverLangs = 'all', onState, onWarn } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'supertonic', onState, onWarn } = {}) {
   stopSpeaking();
   const token = session;
   await cancelP;
@@ -183,9 +183,8 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const trViaPiper = serverLangs === 'de' && lang === 'tr';
-  const serverMode = ((engine === 'server' && !trViaPiper) || engine === 'supertonic') && voicePref !== 'windows';
-  const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
+  const serverMode = (engine === 'server' || engine === 'supertonic') && voicePref !== 'windows';
+  const useSrv = serverMode;
   let warned = false;
   const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });
   const synth = async (t) => {
@@ -202,12 +201,12 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
     }
     return null;
   };
-  let sentences = splitSentences(plain, piperOk ? (serverMode ? 200 : 300) : 200);
+  let sentences = splitSentences(plain, useSrv ? (serverMode ? 200 : 300) : 200);
   if (serverMode) sentences = shortFirst(sentences);
   stateCb = onState || null;
   onState && onState(true);
   try {
-    if (piperOk) {
+    if (useSrv) {
       // Mehrere Sätze vorab erzeugen, während der aktuelle spricht (Server arbeitet sie nacheinander ab).
       const depth = serverMode ? 3 : 2;
       const jobs = [];
@@ -226,13 +225,8 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
         pump(i + depth);
         if (cur) await playBytes(cur, token);
         else {
-          let alt = null;
-          if (serverMode && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]) {
-            try { alt = await window.api.speech.synthesize({ text: sentences[i], voice: lang, speed, piper: true }); } catch { alt = null; }
-          }
           if (token !== session) return;
-          if (alt) await playBytes(alt, token);
-          else await speakWindows(sentences[i], lang, speed, token);
+          await speakWindows(sentences[i], lang, speed, token);
         }
         if (token !== session) return;
       }
