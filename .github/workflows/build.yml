@@ -116,16 +116,16 @@ jobs:
           git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
           cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON
           cmake --build wcpp/build --config Release -j 4 --target whisper-cli whisper-server
-          mkdir -p build-bundled/whisper
-          find wcpp/build -type f -name whisper-cli -exec cp {} build-bundled/whisper/ \;
-          find wcpp/build -type f -name whisper-server -exec cp {} build-bundled/whisper/ \;
-          chmod +x build-bundled/whisper/*
-          ls -la build-bundled/whisper
-          test -x build-bundled/whisper/whisper-cli
-          test -x build-bundled/whisper/whisper-server
+          mkdir -p mac-bundle/whisper
+          find wcpp/build -type f -name whisper-cli -exec cp {} mac-bundle/whisper/ \;
+          find wcpp/build -type f -name whisper-server -exec cp {} mac-bundle/whisper/ \;
+          chmod +x mac-bundle/whisper/*
+          ls -la mac-bundle/whisper
+          test -x mac-bundle/whisper/whisper-cli
+          test -x mac-bundle/whisper/whisper-server
       - name: Eigene Engine (llama.cpp, Metal) laden
         run: |
-          mkdir -p llama-dl llama-x build-bundled/llama
+          mkdir -p llama-dl llama-x mac-bundle/llama
           gh release download "$LLAMA_CPP_TAG" --repo ggml-org/llama.cpp --pattern "llama-*-bin-macos-arm64.*" --dir llama-dl
           ls -la llama-dl
           for f in llama-dl/*; do
@@ -136,13 +136,13 @@ jobs:
           done
           SRV=$(find llama-x -type f -name llama-server | head -1)
           test -n "$SRV"
-          # Symbolische Links (libggml.dylib -> libggml.1.dylib ...) als echte Dateien kopieren: electron-builder scheitert sonst daran.
-          cp -RL "$(dirname "$SRV")"/. build-bundled/llama/
+          # Mit Symlinks kopieren (cp -a). Die Programme kommen erst nach electron-builder ins Paket, weil dessen Kopierschritt an den Symlinks scheitert.
+          cp -a "$(dirname "$SRV")"/. mac-bundle/llama/
           # Nicht gebrauchte Zusatzprogramme weglassen (nur llama-server wird benutzt).
-          find build-bundled/llama -maxdepth 1 -type f -perm +111 ! -name "*.dylib" ! -name llama-server -delete
-          chmod +x build-bundled/llama/llama-server
-          echo "$LLAMA_CPP_TAG" > build-bundled/llama/VERSION
-          ls -la build-bundled/llama | head -30
+          find mac-bundle/llama -maxdepth 1 -type f -perm +111 ! -name "*.dylib" ! -name llama-server -delete
+          chmod +x mac-bundle/llama/llama-server
+          echo "$LLAMA_CPP_TAG" > mac-bundle/llama/VERSION
+          ls -la mac-bundle/llama | head -30
       - run: npm ci
       - run: npm test
       - name: Mac-Programm bauen
@@ -153,6 +153,10 @@ jobs:
         run: |
           APP="$(ls -d dist/mac-arm64/*.app | head -1)"
           echo "App: $APP"
+          mkdir -p "$APP/Contents/Resources"
+          rm -rf "$APP/Contents/Resources/llama" "$APP/Contents/Resources/whisper"
+          cp -a mac-bundle/llama "$APP/Contents/Resources/llama"
+          cp -a mac-bundle/whisper "$APP/Contents/Resources/whisper"
           test -x "$APP/Contents/Resources/llama/llama-server"
           test -x "$APP/Contents/Resources/whisper/whisper-server"
           # Lose Programme und Bibliotheken zuerst, dann das ganze Programm (ad-hoc, "-").
