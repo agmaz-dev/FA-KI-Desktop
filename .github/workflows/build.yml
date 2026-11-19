@@ -136,7 +136,10 @@ jobs:
           done
           SRV=$(find llama-x -type f -name llama-server | head -1)
           test -n "$SRV"
-          cp -R "$(dirname "$SRV")"/. build-bundled/llama/
+          # Symbolische Links (libggml.dylib -> libggml.1.dylib ...) als echte Dateien kopieren: electron-builder scheitert sonst daran.
+          cp -RL "$(dirname "$SRV")"/. build-bundled/llama/
+          # Nicht gebrauchte Zusatzprogramme weglassen (nur llama-server wird benutzt).
+          find build-bundled/llama -maxdepth 1 -type f -perm +111 ! -name "*.dylib" ! -name llama-server -delete
           chmod +x build-bundled/llama/llama-server
           echo "$LLAMA_CPP_TAG" > build-bundled/llama/VERSION
           ls -la build-bundled/llama | head -30
