@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.1.1
+
+- **Browser:** Globus-Knopf oben im Chat öffnet das Seitenfenster als Browser mit Adressleiste (Adresse oder Suchbegriff), Zurück, Vor, Neu laden.
+
 ## Neu in 2.1.0
 
 - **Chat:** Gedanken und Werkzeug-Aktionen (z. B. GitHub lesen) sind eine kleine, zugeklappte Zeile; ein Klick klappt sie auf. Dunkler Anthrazit-Hintergrund. Rechtsklick ins Eingabefeld: „Einfügen“ und „Bild einfügen“ (kopiertes Bild aus der Zwischenablage).

@@ -381,6 +381,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 #panelSplit:hover::after, #panelSplit.drag::after { background: var(--accent); }
 #panel { width: var(--panelw, 520px); flex: none; display: flex; flex-direction: column; background: var(--side); border-left: 1px solid var(--line); min-width: 0; }
 .panel-bar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--line); min-height: 48px; }
+.panel-url { flex: 1; min-width: 0; margin: 0 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border, #3a3a3a); background: rgba(255,255,255,.05); color: inherit; font: inherit; font-size: 13px; outline: none; }
+.panel-url:focus { border-color: var(--accent, #d97757); }
 .panel-title { flex: 1; min-width: 0; padding: 0 8px; font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #panelBody { flex: 1; min-height: 0; background: var(--bg); }
 .in-settings #panel, .in-settings #panelSplit { display: none !important; }

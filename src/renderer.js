@@ -103,13 +103,24 @@ function extractHtml(md) {
 function initPanel() {
   api.panel.onState((s) => {
     panelSt.open = !!s.open; panelSt.mode = s.mode || ''; panelSt.canBack = !!s.canBack; panelSt.canForward = !!s.canForward;
-    $('pTitle').textContent = s.open ? (s.url || s.title || '') : '';
+    const web = s.mode !== 'html';
+    $('pTitle').classList.toggle('hidden', web); $('pUrl').classList.toggle('hidden', !web);
+    $('pTitle').textContent = s.open && !web ? (s.title || '') : '';
+    if (web && document.activeElement !== $('pUrl')) $('pUrl').value = s.url && s.url !== 'about:blank' ? s.url : '';
     $('pBack').disabled = !s.canBack; $('pFwd').disabled = !s.canForward;
     $('pReload').classList.toggle('hidden', s.mode === 'html');
     $('pBack').classList.toggle('hidden', s.mode === 'html'); $('pFwd').classList.toggle('hidden', s.mode === 'html');
     $('pExt').classList.toggle('hidden', s.mode === 'html');
     panelSync();
   });
+  const goUrl = () => {
+    let v = $('pUrl').value.trim(); if (!v) return;
+    if (!/^https?:\/\//i.test(v)) v = /^[^\s]+\.[a-z]{2,}([\/?#:].*)?$/i.test(v) ? 'https://' + v : 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
+    openPanelUrl(v); $('pUrl').blur();
+  };
+  $('pUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') goUrl(); });
+  $('pUrl').addEventListener('focus', () => $('pUrl').select());
+  $('btnBrowser').onclick = () => { if (panelSt.open && panelSt.mode === 'web') { $('pUrl').focus(); return; } panelShow(); openPanelUrl('https://duckduckgo.com/'); setTimeout(() => $('pUrl').focus(), 150); };
   $('pBack').onclick = () => api.panel.nav('back');
   $('pFwd').onclick = () => api.panel.nav('forward');
   $('pReload').onclick = () => api.panel.nav('reload');
