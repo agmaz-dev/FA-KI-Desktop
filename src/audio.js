@@ -28,7 +28,12 @@ async function blobToWav16k(blob) {
   src.connect(off.destination);
   src.start();
   const rendered = await off.startRendering();
-  return encodeWav(rendered.getChannelData(0), rate);
+  const data = rendered.getChannelData(0);
+  // Leise Aufnahmen anheben: Whisper erkennt sonst nur Stille („[Musik]“).
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
+  if (peak > 0.0005 && peak < 0.6) { const g = Math.min(40, 0.9 / peak); for (let i = 0; i < data.length; i++) data[i] *= g; }
+  return encodeWav(data, rate);
 }
 
 /**
@@ -36,7 +41,8 @@ async function blobToWav16k(blob) {
  * Gibt { stop(), cancel(), done } zurück; done liefert WAV-Bytes (16 kHz, mono) oder null (nichts gesprochen).
  */
 export async function startRecording({ vad = false, onLevel, deviceId = '' } = {}) {
-  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  // Rauschunterdrückung und Echo-Filter von Chromium verschlucken bei manchen Mikrofonen die Sprache (dann hört Whisper nur „[Musik]“).
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 };
   if (deviceId) audio.deviceId = { exact: deviceId };
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio }); }

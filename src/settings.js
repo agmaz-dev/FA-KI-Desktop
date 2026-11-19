@@ -499,8 +499,9 @@ export async function openSettings(ctx, startTab = 'general') {
         const { startRecording } = await import('./audio.js');
         const r = await startRecording({ deviceId: micSel.value });
         setTimeout(() => r.stop(), 3000);
-        await r.done;
-        micLvl.textContent = r.peak < 0.006 ? 'Fast nur Stille. Falsches Mikrofon oder zu leise.' : `Signal da (Pegel ${Math.min(100, Math.round(r.peak * 400))} %). Das Mikrofon funktioniert.`;
+        const wav = await r.done;
+        micLvl.textContent = r.peak < 0.006 ? 'Fast nur Stille. Falsches Mikrofon oder zu leise.' : `Signal da (Pegel ${Math.min(100, Math.round(r.peak * 400))} %). Du hörst Deine Aufnahme jetzt zur Kontrolle.`;
+        if (wav) { const au = new Audio(URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))); await au.play().catch(() => {}); }
       } catch (e) { micLvl.textContent = 'Fehler: ' + (e.message || e); }
       micTest.disabled = false;
     };

@@ -297,7 +297,7 @@ http.createServer((req, res) => {
     assert.strictEqual(await sm.transcribe(wav, 'de', 'small'), 'Grüße aus München');
     const lines = fs.readFileSync(log, 'utf8').trim().split('\n');
     assert.strictEqual(lines.filter((l) => l === 'start').length, 1, 'Modell darf nur einmal geladen werden');
-    assert.ok(lines.includes('768 de'));
+    assert.ok(lines.includes('undefined de')); // kein audio_ctx mehr: es führte zu Fehlerkennung ("[Musik]")
   } finally {
     sm.stopWhisperServer();
   }
