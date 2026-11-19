@@ -2,7 +2,7 @@
 const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { Store } = require('./lib/store');
+const { Store, DEFAULT_SETTINGS } = require('./lib/store');
 const ollama = require('./lib/ollama');
 const { SpeechManager, VOICES } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
@@ -90,6 +90,10 @@ if (!gotLock) {
     setTimeout(async () => {
       try {
         if (!speech.piperBin()) return;
+        // Nur wenn Piper wirklich spricht (Motor Piper, oder OuteTTS mit Piper für Türkisch/Rückfall).
+        // Bei Supertonic wird nichts im Hintergrund geladen.
+        const eng = store.getSettings().ttsEngine;
+        if (eng !== 'piper' && eng !== 'server') return;
         for (const k of ['de', 'tr']) {
           const iv = speech.installedVoice(k);
           const want = VOICES[k].names[0];
@@ -97,6 +101,8 @@ if (!gotLock) {
         }
       } catch { /* egal, dann bleibt die vorhandene Stimme */ }
     }, 5000);
+    // Spracherkennung vorwärmen: whisper-server lädt das Modell einmal und behält es im Speicher.
+    setTimeout(() => { speech.warmStt(store.getSettings().sttModel); }, 3000);
     let st = store.getSettings();
     // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Piper
     if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
@@ -122,10 +128,22 @@ if (!gotLock) {
 
 const base = () => store.getSettings().ollamaUrl;
 
+// Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir']);
+/** Lässt aus der Oberfläche nur bekannte, unkritische Einstellungen durch. */
+function filterRendererSettings(patch) {
+  const out = {};
+  if (!patch || typeof patch !== 'object') return out;
+  for (const [k, v] of Object.entries(patch)) {
+    if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, k) && !MAIN_ONLY_SETTINGS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 function registerIpc() {
   // ---------- Einstellungen & Chats ----------
   ipcMain.handle('settings:get', () => store.getSettings());
-  ipcMain.handle('settings:set', (_e, patch) => store.setSettings(patch));
+  ipcMain.handle('settings:set', (_e, patch) => store.setSettings(filterRendererSettings(patch)));
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));
   ipcMain.handle('chats:save', (_e, chat) => store.saveChat(chat));
@@ -203,6 +221,9 @@ function registerIpc() {
         });
       }, pullController.signal);
       return true;
+    } catch (e) {
+      if (pullController && pullController.signal.aborted) return { aborted: true };
+      throw e;
     } finally {
       pullController = null;
     }
@@ -243,13 +264,14 @@ function registerIpc() {
   ipcMain.handle('speech:prepareTts', (_e, voice) => speech.prepareTts(voice));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
   ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
+  ipcMain.handle('speech:warmStt', (_e, model) => speech.warmStt(model || store.getSettings().sttModel));
   ipcMain.handle('speech:synthesize', (_e, { text, voice, speed, piper }) => {
     const s = store.getSettings();
     if (!piper && s.ttsEngine === 'supertonic') return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
     if (!piper && s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return speech.synthesize(text, voice, speed);
   });
-  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); return true; });
+  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); supertonic.cancel(); return true; });
   ipcMain.handle('supertonic:setup', async () => {
     try {
       await supertonic.prepare();
@@ -263,7 +285,13 @@ function registerIpc() {
     }
   });
   ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
-  ipcMain.handle('speech:cancelSynth', () => speech.cancelServer(store.getSettings().ttsServerUrl));
+  ipcMain.handle('speech:cancelSynth', async () => {
+    // Stopp gilt für alle Stimmen-Motoren: Supertonic (läuft in der App) und den OuteTTS-Server.
+    supertonic.cancel();
+    const s = store.getSettings();
+    if (s.ttsEngine === 'server') await speech.cancelServer(s.ttsServerUrl);
+    return true;
+  });
   ipcMain.handle('speech:startServer', () => procs.ensureTtsServer(store.getSettings()));
   ipcMain.handle('speech:pickSample', async () => {
     const r = await dialog.showOpenDialog(win, {
@@ -298,6 +326,10 @@ function registerIpc() {
   ipcMain.handle('voice:cleanOld', () => ({ removed: voiceInst.cleanOld() }));
   ipcMain.handle('voice:setup', async () => {
     const before = store.getSettings();
+    const sampleName = path.basename(String(before.ttsSampleFile || ''));
+    if (!sampleName || !fs.existsSync(path.join(app.getPath('userData'), 'voices', sampleName))) {
+      return { ok: false, error: 'Keine Stimmprobe gefunden. Bitte zuerst „Aufnahme wählen …“ und eine 10–18 Sekunden lange WAV-Aufnahme auswählen – erst dann wird geladen.', settings: before };
+    }
     try {
       const r = await voiceInst.install();
       const sample = before.ttsSampleFile || '';
@@ -307,7 +339,7 @@ function registerIpc() {
       });
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
-      await procs.freePort(voiceInst.url());
+      await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
       apply(r.cmd);
       const st = await procs.ensureTtsServer(store.getSettings());
       try {
@@ -324,7 +356,7 @@ function registerIpc() {
         return { ok: true, seconds: warm.seconds, cold: cold.seconds, device: ready.detail, settings: store.getSettings() };
       } catch (e) {
         await procs.stop('tts');
-        await procs.freePort(voiceInst.url());
+        await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
         if (/oute_server\.py/.test(before.ttsServerCmd || '')) { apply(before.ttsServerCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
         else store.setSettings({ ttsEngine: 'piper', ttsServerAuto: false });
         throw e;
@@ -376,5 +408,6 @@ async function getOcrWorker() {
 
 app.on('before-quit', () => {
   procs.killAll();
+  if (speech) speech.stopWhisperServer();
   if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
 });

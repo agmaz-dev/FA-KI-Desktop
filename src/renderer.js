@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify';
 import { readPdf, prepareImage, isPdf, isImage } from './docs.js';
 import { startRecording, speak, stopSpeaking } from './audio.js';
 import { fitText, formatBytes } from '../lib/util.js';
-import { buildThink } from '../lib/ollama.js';
+import { buildThink } from '../lib/think.js';
 import { $, el, icon, iconButton, applyIcons, openModal, closeModal, newId } from './ui.js';
 import { openSettings, profilePrompt } from './settings.js';
 
@@ -106,7 +106,8 @@ async function loadModels() {
 async function getCaps(name) {
   if (!name) return [];
   if (!state.caps[name]) {
-    try { state.caps[name] = (await api.ollama.show(name)).capabilities; } catch { state.caps[name] = []; }
+    // Fehler (z. B. Ollama startet noch) nicht merken, sonst bleiben Denken/Bilder bis zum Neustart aus.
+    try { state.caps[name] = (await api.ollama.show(name)).capabilities || []; } catch { return []; }
   }
   return state.caps[name];
 }
@@ -335,17 +336,34 @@ function systemText() {
   return parts.join('\n\n');
 }
 
+/**
+ * Baut den Verlauf für Ollama und hält ihn innerhalb der Kontextlänge:
+ * Dateien und Bilder gehen nur mit der neuesten Nachricht vollständig mit, ältere werden gekürzt,
+ * und die ältesten Runden fallen weg, wenn das Zeichenbudget (≈ num_ctx × 2,6) überschritten wird.
+ */
 function buildOllamaMessages() {
-  const msgs = [];
   const sys = systemText();
-  if (sys) msgs.push({ role: 'system', content: sys });
-  for (const m of state.chat.messages) {
-    if (m.role === 'assistant') { if (m.content) msgs.push({ role: 'assistant', content: m.content }); continue; }
-    const o = { role: 'user', content: (m.ctx ? m.ctx + '\n\n' : '') + m.content };
-    if (m.images && m.images.length) o.images = m.images;
-    msgs.push(o);
+  const all = state.chat.messages.filter((m) => m.role !== 'assistant' || m.content);
+  const lastUser = all.map((m) => m.role).lastIndexOf('user');
+  const budget = Math.max(6000, Math.floor(state.settings.numCtx * 2.6) - 2000) - (sys ? sys.length : 0);
+  const out = [];
+  let used = 0;
+  for (let i = all.length - 1; i >= 0; i--) {
+    const m = all[i];
+    let o;
+    if (m.role === 'assistant') o = { role: 'assistant', content: m.content };
+    else {
+      const ctx = m.ctx ? (i === lastUser ? m.ctx : fitText(m.ctx, 1500).text) : '';
+      o = { role: 'user', content: (ctx ? ctx + '\n\n' : '') + m.content };
+      if (i === lastUser && m.images && m.images.length) o.images = m.images;
+    }
+    const len = o.content.length;
+    if (out.length && used + len > budget) break; // neueste Nachricht immer mitschicken
+    used += len;
+    out.unshift(o);
   }
-  return msgs;
+  if (sys) out.unshift({ role: 'system', content: sys });
+  return out;
 }
 
 async function send() {
@@ -529,6 +547,7 @@ async function transcribeWav(wav) {
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
   if (!(await ensureStt())) return;
+  api.speech.warmStt(state.settings.sttModel).catch(() => {}); // Modell lädt, während gesprochen wird
   try { stopAllSpeech(); state.rec = await startRecording({ vad: false }); }
   catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   $('btnMic').classList.add('rec');
@@ -548,6 +567,7 @@ async function toggleMic() {
 
 async function convListen() {
   if (!state.conv || state.rec || state.streaming) return;
+  api.speech.warmStt(state.settings.sttModel).catch(() => {});
   try { state.rec = await startRecording({ vad: true }); }
   catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
   hint('Ich höre zu … sprich einfach.', 0);
@@ -590,12 +610,21 @@ function renderPending() {
   });
 }
 
+/** Textdatei dekodieren: UTF-8 (mit/ohne BOM), UTF-16 (BOM) oder Windows-1252 (ANSI, z. B. Excel-CSV). */
+function decodeText(u8) {
+  if (u8[0] === 0xff && u8[1] === 0xfe) return new TextDecoder('utf-16le').decode(u8);
+  if (u8[0] === 0xfe && u8[1] === 0xff) return new TextDecoder('utf-16be').decode(u8);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); }
+  catch { return new TextDecoder('windows-1252').decode(u8); }
+}
+
 async function addFile(name, data) {
   try {
     if (isPdf(name)) {
       showProgress('PDF wird gelesen', null);
       const r = await readPdf(data, (t) => showProgress(t, null));
-      const note = `${r.readPages} Seiten` + (r.ocrPages ? `, ${r.ocrPages} per OCR` : '');
+      const note = (r.readPages < r.pageCount ? `nur ${r.readPages} von ${r.pageCount} Seiten` : `${r.readPages} Seiten`) + (r.ocrPages ? `, ${r.ocrPages} per OCR` : '');
+      if (r.readPages < r.pageCount) hint(`„${name}“ hat ${r.pageCount} Seiten – gelesen werden nur die ersten ${r.readPages}.`, 0);
       if (!r.text.replace(/---.*?---/g, '').trim()) hint('Aus dieser PDF konnte kein Text gelesen werden.', 0);
       state.pending.push({ kind: 'doc', name, text: r.text, note });
     } else if (isImage(name)) {
@@ -609,7 +638,7 @@ async function addFile(name, data) {
       }
       state.pending.push(item);
     } else {
-      const text = new TextDecoder('utf-8').decode(data instanceof Uint8Array ? data : new Uint8Array(data));
+      const text = decodeText(data instanceof Uint8Array ? data : new Uint8Array(data));
       state.pending.push({ kind: 'doc', name, text, note: `${text.length} Zeichen` });
     }
   } catch (e) { hint(`„${name}“ konnte nicht gelesen werden: ${e.message || e}`, 0); }
@@ -656,20 +685,25 @@ async function openModels() {
     m.appendChild(sugg);
     const prog = el('div', 'note', ''); prog.style.marginTop = '10px';
     m.appendChild(prog);
+    if (m._offPull) m._offPull(); // beim Neuaufbau alten Listener entfernen
     const off = api.ollama.onPull((p) => {
       prog.textContent = p.total ? `${p.name}: ${p.status} – ${Math.round((p.completed / p.total) * 100)} % (${formatBytes(p.completed)} / ${formatBytes(p.total)})` : `${p.name}: ${p.status}`;
     });
+    m._offPull = off;
     go.onclick = async () => {
       const name = inp.value.trim();
       if (!name) return;
       if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
       go.disabled = true; go.textContent = 'Lädt …';
-      try { await api.ollama.pull(name); await loadModels(); off(); render(m); }
-      catch (e) { prog.textContent = 'Fehler: ' + (e.message || e); go.disabled = false; go.textContent = 'Laden'; }
+      try {
+        const r = await api.ollama.pull(name);
+        if (r && r.aborted) { prog.textContent = 'Download abgebrochen.'; go.disabled = false; go.textContent = 'Laden'; return; }
+        await loadModels(); render(m);
+      } catch (e) { prog.textContent = 'Fehler: ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); go.disabled = false; go.textContent = 'Laden'; }
     };
     const act = el('div', 'actions');
     const stop = el('button', 'btn', 'Download abbrechen'); stop.onclick = () => api.ollama.pullCancel();
-    const close = el('button', 'btn primary', 'Schließen'); close.onclick = () => { off(); closeModal(); };
+    const close = el('button', 'btn primary', 'Schließen'); close.onclick = () => { off(); m._offPull = null; closeModal(); };
     act.append(stop, close);
     m.appendChild(act);
   };

@@ -86,3 +86,33 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 ## Neu in 1.8.9
 - Piper: Stimmen, die das mitgelieferte Sprachprogramm nicht lesen kann (Kerstin „medium“), werden übersprungen und durch die passende Version (Kerstin „low“) ersetzt. Die bevorzugte Stimme (Kerstin, dfki) wird beim Start still nachgeladen, falls sie fehlt.
+
+## Neu in 1.8.11
+**Spracherkennung (Whisper)**
+- Umlaute bleiben heil: Aus „Grüße“ wurde manchmal „Gr��ße“, wenn ein „ü“ genau an einer Blockgrenze der Ausgabe lag.
+- Deutlich schneller: Das Whisper-Modell bleibt in einem Hintergrundprogramm (`whisper-server`) geladen, statt bei jeder Aufnahme neu geladen zu werden. Es startet kurz nach dem App-Start bzw. beim Drücken des Mikrofons und wird 15 Minuten nach der letzten Nutzung wieder aus dem Speicher genommen. Zusätzlich rechnet Whisper nur noch ein Fenster passend zur Aufnahmelänge statt immer 30 Sekunden. Fehlt `whisper-server.exe`, wird wie bisher `whisper-cli.exe` benutzt.
+- Messen unter Windows: `node scripts/bench-whisper.js aufnahme.wav small` vergleicht alt (whisper-cli) und neu (whisper-server).
+- Tipp: Spracheingabe auf „Deutsch“ statt „Automatisch“ stellen – die Spracherkennung der Sprache kostet sonst etwa doppelt so viel Rechenzeit.
+
+**Vorlesen (Supertonic)**
+- „Stopp“ hält Supertonic jetzt sofort an: Der laufende Satz wird abgebrochen, schon vorbereitete Sätze werden nicht mehr berechnet.
+
+**Meine Stimme (OuteTTS)**
+- Die Einrichtung braucht eine Stimmprobe. Ohne Aufnahme bricht sie jetzt **vor** dem mehrere GB großen Download mit einer klaren Meldung ab (bisher scheiterte erst der Testsatz am Ende). Der Server meldet eine fehlende Probe verständlich (422).
+- Die kleineren Modelle Q4/Q5 lädt die App nicht selbst herunter. Wer sie nutzen möchte, legt `OuteTTS-1.0-0.6B-Q4_0.gguf` (oder `Q5_0`) selbst in den Ordner `voice` neben die Q8-Datei.
+- Der interne llama-server nimmt einen freien Port statt fest 8081.
+
+**Chat und Ollama**
+- Lange Ladezeiten großer Modelle führen nicht mehr nach 5 Minuten zu „fetch failed“; abgebrochene oder fehlerhafte Antworten schließen die Verbindung sauber.
+- Fähigkeiten eines Modells (Denken, Bilder) bleiben nicht mehr aus, nur weil Ollama beim Start noch nicht bereit war.
+- Lange Chats mit mehreren Dateien sprengen den Kontext nicht mehr: Dateien und Bilder gehen nur mit der neuesten Nachricht vollständig mit, älteste Runden fallen bei Bedarf weg.
+- Textdateien in Windows-Kodierung (z. B. CSV aus Excel) und UTF-16 werden mit richtigen Umlauten gelesen.
+- PDFs mit mehr als 80 Seiten: deutlicher Hinweis, dass nur die ersten 80 gelesen werden.
+- Modell-Download abbrechen zeigt „Download abgebrochen“ statt einer Fehlermeldung.
+
+**Sicherheit und Aufräumen**
+- Die Oberfläche kann den Startbefehl des Stimmen-Servers nicht mehr setzen; nur bekannte Einstellungen werden übernommen.
+- Beim Freimachen von Port 8004 werden nur noch eigene Programme beendet.
+- `__pycache__` ist aus dem Repo und dem Installationsprogramm entfernt; adm-zip auf 0.6.1 (keine bekannten Lücken mehr).
+- Piper-Stimmen werden beim Start nur noch nachgeladen, wenn Piper auch als Stimme genutzt wird.
+- Build: whisper.cpp ist auf v1.9.5 angepinnt, `whisper-server.exe` wird mitgeliefert (der Build prüft das), ein vorhandenes Release wird nicht mehr überschrieben, der Workflow prüft auch Pull Requests und hat ein Zeitlimit von 45 Minuten.
