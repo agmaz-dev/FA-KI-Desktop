@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage, nativeTheme } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Store, DEFAULT_SETTINGS } = require('./lib/store');
@@ -30,12 +30,13 @@ const send = (ch, payload) => {
 };
 
 function createWindow() {
+  nativeTheme.themeSource = store.getSettings().theme === 'light' ? 'light' : 'dark';
   win = new BrowserWindow({
     width: 1240,
     height: 800,
     minWidth: 860,
     minHeight: 560,
-    backgroundColor: '#262624',
+    backgroundColor: store.getSettings().theme === 'light' ? '#faf9f5' : '#262624',
     title: 'FA KI Desktop',
     autoHideMenuBar: true,
     webPreferences: {
@@ -188,7 +189,11 @@ function filterRendererSettings(patch) {
 function registerIpc() {
   // ---------- Einstellungen & Chats ----------
   ipcMain.handle('settings:get', () => publicSettings(store.getSettings()));
-  ipcMain.handle('settings:set', (_e, patch) => publicSettings(store.setSettings(filterRendererSettings(patch))));
+  ipcMain.handle('settings:set', (_e, patch) => {
+    const next = store.setSettings(filterRendererSettings(patch));
+    nativeTheme.themeSource = next.theme === 'light' ? 'light' : 'dark';
+    return publicSettings(next);
+  });
   ipcMain.handle('github:setToken', async (_e, token) => {
     const t = String(token || '').trim();
     if (!t) { setGithubToken(''); return { ok: true, login: '' }; }

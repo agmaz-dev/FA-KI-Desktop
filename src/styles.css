@@ -348,3 +348,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .stat-chip span { font-weight: 600; }
 .stats-row .web-link { border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; }
 .col-detail h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }

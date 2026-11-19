@@ -125,6 +125,9 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Piper-Stimmen werden beim Start nur noch nachgeladen, wenn Piper auch als Stimme genutzt wird.
 - Build: whisper.cpp ist auf v1.9.5 angepinnt, `whisper-server.exe` wird mitgeliefert (der Build prüft das), ein vorhandenes Release wird nicht mehr überschrieben, der Workflow prüft auch Pull Requests und hat ein Zeitlimit von 45 Minuten.
 
+## Neu in 1.10.5
+Auch Fenster, Dialoge und Bildlaufleisten sind im dunklen Grau.
+
 ## Neu in 1.10.4
 Dunkles Grau (wie im Claude-Chat) ist überall Standard, „Wie Windows“ entfällt; Erkunden mit neuem Design (Herausgeber-Symbol, Statistik-Kästchen).
 
