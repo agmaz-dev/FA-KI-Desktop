@@ -97,6 +97,7 @@ async function openPanelUrl(url) { panelShow(); try { await api.panel.openUrl(ur
 async function openPanelHtml(html, title) { panelShow(); try { await api.panel.html({ html, title }); } catch (e) { hint(cleanErr(e), 0); } }
 function cleanErr(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
 /** Holt ein vollständiges HTML-Dokument aus einer Antwort (```html-Block oder Dokument im Codeblock). */
+let liveHtmlAt = 0; let liveHtmlLen = 0;
 function extractHtml(md) {
   const re = /```[a-zA-Z]*\s*\n([\s\S]*?)```/g;
   let m; let best = '';
@@ -425,18 +426,26 @@ function fillMsg(wrap, m, live = false, isLast = false) {
   const md = el('div', 'md');
   md.innerHTML = renderMd(m.content);
   md.querySelectorAll('pre').forEach((pre) => {
+    const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+    if (/^\s*(<!doctype html|<html)/i.test(code)) {
+      // Ganze Webseiten/Folien: kein Code im Chat, nur eine kleine Karte; die Seite läuft rechts in der Vorschau.
+      const card = el('div', 'htmlcard');
+      card.appendChild(el('span', 'hc-t', live && !m.error ? 'Seite wird erstellt …' : 'Webseite / Folien'));
+      const pv = el('button', 'btn small', 'Vorschau öffnen');
+      pv.onclick = () => openPanelHtml(code, 'Vorschau');
+      const cp = el('button', 'btn small', 'Code kopieren');
+      cp.onclick = () => { navigator.clipboard.writeText(code); cp.textContent = 'Kopiert ✓'; setTimeout(() => { cp.textContent = 'Code kopieren'; }, 1500); };
+      card.append(pv, cp);
+      pre.replaceWith(card);
+      if (live && Date.now() - (liveHtmlAt || 0) > 2500 && code.length > (liveHtmlLen || 0) + 200) { liveHtmlAt = Date.now(); liveHtmlLen = code.length; openPanelHtml(code, 'Vorschau'); }
+      return;
+    }
     const b = el('button', 'copybtn', 'Kopieren');
     b.onclick = () => {
-      navigator.clipboard.writeText(pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText);
+      navigator.clipboard.writeText(code);
       b.textContent = 'Kopiert ✓'; setTimeout(() => { b.textContent = 'Kopieren'; }, 1500);
     };
     pre.appendChild(b);
-    const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
-    if (/^\s*(<!doctype html|<html)/i.test(code)) {
-      const pv = el('button', 'copybtn prevbtn', 'Vorschau');
-      pv.onclick = () => openPanelHtml(code, 'Vorschau');
-      pre.appendChild(pv);
-    }
   });
   md.querySelectorAll('a').forEach((a) => {
     a.target = '_blank'; a.rel = 'noreferrer';
@@ -637,6 +646,7 @@ async function finishStream(id, extra) {
   state.chat.updated = Date.now();
   fillMsg(s.wrap, s.asst, false, true);
   if (s.asst.content && !s.asst.error && !(extra && extra.aborted)) { const h = extractHtml(s.asst.content); if (h) openPanelHtml(h, 'Vorschau'); }
+  liveHtmlLen = 0; liveHtmlAt = 0;
   updateCtxInfo();
   await api.chats.save(state.chat);
   await refreshChats();
