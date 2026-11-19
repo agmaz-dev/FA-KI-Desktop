@@ -75,17 +75,17 @@ api.speech.onProgress((p) => {
 
 // ---------- Status & Modelle ----------
 async function refreshStatus() {
-  const s = await api.ollama.status();
+  const s = await api.models.status();
   const box = $('status');
   box.classList.toggle('ok', s.ok);
   box.classList.toggle('bad', !s.ok);
-  $('statusText').textContent = s.ok ? `Ollama ${s.version} läuft lokal` : 'Ollama nicht erreichbar';
-  if (!s.ok) hint('Ollama ist nicht erreichbar. Die App versucht es zu starten; sonst bitte die Ollama-App öffnen.', 0);
+  $('statusText').textContent = s.ok ? `Eigene Engine ${s.version || ''} · alles lokal`.replace('  ', ' ') : 'Engine fehlt';
+  if (!s.ok) hint(s.error || 'Die Rechen-Engine fehlt.', 0);
   return s.ok;
 }
 
 async function loadModels() {
-  try { state.models = await api.ollama.models(); } catch { state.models = []; }
+  try { state.models = await api.models.list(); } catch { state.models = []; }
   const sel = $('modelSel');
   sel.innerHTML = '';
   const visible = state.models.filter((m) => state.settings.showCloud || !m.remote);
@@ -131,8 +131,8 @@ function renderModelMenu() {
 async function getCaps(name) {
   if (!name) return [];
   if (!state.caps[name]) {
-    // Fehler (z. B. Ollama startet noch) nicht merken, sonst bleiben Denken/Bilder bis zum Neustart aus.
-    try { state.caps[name] = (await api.ollama.show(name)).capabilities || []; } catch { return []; }
+    // Fehler (z. B. Engine startet noch) nicht merken, sonst bleiben Denken/Bilder bis zum Neustart aus.
+    try { state.caps[name] = (await api.models.show(name)).capabilities || []; } catch { return []; }
   }
   return state.caps[name];
 }
@@ -369,7 +369,7 @@ function systemText() {
 }
 
 /**
- * Baut den Verlauf für Ollama und hält ihn innerhalb der Kontextlänge:
+ * Baut den Verlauf für die Engine und hält ihn innerhalb der Kontextlänge:
  * Dateien und Bilder gehen nur mit der neuesten Nachricht vollständig mit, ältere werden gekürzt,
  * und die ältesten Runden fallen weg, wenn das Zeichenbudget (≈ num_ctx × 2,6) überschritten wird.
  */
@@ -461,12 +461,10 @@ async function runAssistant() {
   state.streaming = { id, asst, wrap };
   setBusy(true);
   const think = buildThink(model, caps, $('thinkSel').value);
-  const ka = state.settings.keepAlive;
   const body = {
     model,
     messages: history,
     options: { num_ctx: state.settings.numCtx, temperature: state.settings.temperature },
-    keep_alive: ka === '-1' ? -1 : ka,
   };
   if (think !== undefined) body.think = think;
   const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false || state.settings.agentTools !== false);
@@ -709,7 +707,7 @@ async function startPull(name) {
   Object.assign(dl, { state: 'running', name, status: 'Starte Download …', completed: 0, total: 0, error: '' });
   dlEmit();
   try {
-    const r = await api.ollama.pull(name);
+    const r = await api.models.download(name);
     dl.state = r && r.aborted ? 'cancelled' : 'done';
     if (dl.state === 'done') { dl.completed = dl.total; await loadModels(); }
   } catch (e) {
@@ -718,9 +716,9 @@ async function startPull(name) {
   }
   dlEmit();
 }
-function dlCancel() { api.ollama.pullCancel(); }
+function dlCancel() { api.models.cancel(); }
 function dlDismiss() { dl.state = 'idle'; dlEmit(); }
-api.ollama.onPull((p) => { if (dl.state !== 'running') return; dl.status = p.status; if (p.total) { dl.total = p.total; dl.completed = p.completed; } dlEmit(); });
+api.models.onProgress((p) => { if (dl.state !== 'running') return; dl.status = p.status; if (p.total) { dl.total = p.total; dl.completed = p.completed; } dlEmit(); });
 
 /** Kleine Download-Anzeige (Seitenleiste und Einstellungs-Navigation) */
 function dlWidget() {
@@ -941,7 +939,6 @@ async function init() {
   renderTtsButton();
   if (state.settings.sidebarOpen === false) toggleSidebar(false);
   wire();
-  api.app.onOllamaStart((r) => { if (r && r.started) { hint('Ollama wurde automatisch gestartet.'); refreshStatus().then(loadModels).catch(() => {}); } else if (r && !r.ok) hint('Ollama ließ sich nicht automatisch starten: ' + (r.error || ''), 0); });
   api.app.onTtsStart((r) => { if (r && r.started) hint('Stimmen-Server wurde gestartet.'); else if (r && !r.ok) hint('Stimmen-Server: ' + (r.error || 'nicht gestartet'), 0); });
   state.chat = newChat();
   await refreshStatus();

@@ -1,6 +1,6 @@
 # FA KI Desktop
 
-Deutsche Windows-App für lokale KI mit [Ollama](https://ollama.com). Alles läuft auf dem eigenen PC.
+Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut, ohne Ollama). Alles läuft auf dem eigenen PC; Internet braucht nur der Modell-Download von Hugging Face.
 
 - Chat mit Modellauswahl und Denktiefe (gpt-oss: niedrig/mittel/hoch)
 - Chats werden nur lokal gespeichert
@@ -11,10 +11,17 @@ Deutsche Windows-App für lokale KI mit [Ollama](https://ollama.com). Alles läu
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.0.0 – eigene Engine, ohne Ollama
+
+- Die App bringt ihre Rechen-Engine (llama.cpp mit Vulkan, läuft auf AMD, NVIDIA und Intel) selbst mit. Ollama wird nicht mehr gebraucht und nicht mehr gestartet.
+- Modelle sind normale GGUF-Dateien im **Modellordner** (Standard: App-Daten, änderbar in der Bibliothek). Download direkt von Hugging Face, fortsetzbar nach Abbruch; lose GGUF-Dateien im Ordner werden erkannt.
+- „Modell im Speicher halten“ entlädt das Modell nach der Zeit aus dem RAM und lädt es beim nächsten Chat neu.
+- Bibliothek: Button „Aus Ollama übernehmen“ verknüpft vorhandene Ollama-Modelle ohne zusätzlichen Platz (nicht jede Ollama-Datei läuft in llama.cpp).
+- Entfernt: Ollama-Adresse und Autostart in den Einstellungen.
+
 ## Neu in 1.3.0
 - Antworten und ganze Chats als **PDF** oder **Word (.docx)** speichern (Knöpfe unter jeder Antwort, Export-Symbol oben).
 - **Eigene Stimme:** In den Einstellungen unter Sprache den Stimmen-Motor „Eigener Stimmen-Server“ wählen (z. B. Chatterbox), eine eigene Stimmprobe auswählen, Ordner und Startbefehl des Servers eintragen. Die App kann den Server beim Start im Hintergrund starten.
-- **Ollama** wird beim Start automatisch gestartet, falls es nicht läuft (abschaltbar).
 - Die KI stellt sich als „FA KI“ vor.
 
 ## Neu in 1.4.0
@@ -151,7 +158,7 @@ Oberfläche wie bei Bionic: „Erkunden“ und „Bibliothek“ liegen in Einste
 - Einstellungen → **Internet und Agent**: Schalter, Arbeitsordner wählen, Prüfung ob Git und Node gefunden werden, GitHub-Token (zum Schreiben mit Schreibrechten).
 
 **Erkunden und Bibliothek (wie bei LM Studio)**
-- **Erkunden:** Modelle auf Hugging Face suchen (GGUF, sortiert nach Beliebtheit, Trend, Likes, Datum), Details mit Beschreibung, allen Stufen (Q4, Q6, Q8 …) mit Größe, **„Passt auf Deine Karte“** (Grafikspeicher und Arbeitsspeicher einstellbar), Empfehlung und Download über Ollama. Bilder/Werkzeuge/Denken sind nur aus Schlagworten geschätzt.
+- **Erkunden:** Modelle auf Hugging Face suchen (GGUF, sortiert nach Beliebtheit, Trend, Likes, Datum), Details mit Beschreibung, allen Stufen (Q4, Q6, Q8 …) mit Größe, **„Passt auf Deine Karte“** (Grafikspeicher und Arbeitsspeicher einstellbar), Empfehlung und Download direkt von Hugging Face in den Modellordner. Bilder/Werkzeuge/Denken sind nur aus Schlagworten geschätzt.
 - **Bibliothek:** installierte Modelle mit Größe, Parametern, Bit-Stufe und Fähigkeiten; „Im Chat verwenden“ und „Löschen“.
 
 **Oberfläche im Stil von Bionic**

@@ -94,9 +94,9 @@ export function mountExplore(root, ctx) {
     const e = el('div', 'detail-empty');
     e.appendChild(el('div', null, 'Wähle links ein Modell, um Größen, Stufen und Beschreibung zu sehen.'));
     const direct = el('div', 'direct');
-    direct.appendChild(el('div', 'note', 'Oder gleich laden mit dem Namen aus der Ollama-Bibliothek (z. B. gpt-oss:20b):'));
+    direct.appendChild(el('div', 'note', 'Oder direkt von Hugging Face laden (besitzer/repo:STUFE):'));
     const inl = el('div', 'inline');
-    const inp = el('input'); inp.type = 'text'; inp.placeholder = 'gpt-oss:20b';
+    const inp = el('input'); inp.type = 'text'; inp.placeholder = 'unsloth/gpt-oss-20b-GGUF:Q4_K_M';
     const b = el('button', 'btn', 'Laden');
     const st = el('div', 'note');
     b.onclick = () => { if (inp.value.trim()) { download(inp.value.trim()); st.textContent = 'Download läuft – Stand siehst Du links unten und in der Bibliothek.'; } };
@@ -258,10 +258,42 @@ export function mountLibrary(root, ctx) {
   const dirRow = el('div', 'dir-row');
   const dic = el('span', 'dr-icon'); dic.innerHTML = icon('library', 18);
   const dtxt = el('div', 'grow');
-  dtxt.appendChild(el('div', 'lc-name', 'Ollama'));
-  dtxt.appendChild(el('div', 'note', 'Die Modelle liegen im Ollama-Ordner dieses PCs.'));
-  dirRow.append(dic, dtxt);
+  dtxt.appendChild(el('div', 'lc-name', 'Modellordner'));
+  const dpath = el('div', 'note', '…');
+  dtxt.appendChild(dpath);
+  const dact = el('div'); dact.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+  const bOpen = el('button', 'btn small', 'Öffnen'); bOpen.onclick = () => api.models.openDir();
+  const bPick = el('button', 'btn small', 'Ändern …');
+  bPick.onclick = async () => { await api.models.pickDir(); await showDir(); await ctx.refreshModels(); await load(); };
+  const bOll = el('button', 'btn small', 'Aus Ollama übernehmen …');
+  dact.append(bOpen, bPick, bOll);
+  dirRow.append(dic, dtxt, dact);
+  async function showDir() { try { dpath.textContent = (await api.models.status()).dir || ''; } catch { dpath.textContent = ''; } }
+  showDir();
+  const olBox = el('div', 'note'); olBox.style.margin = '6px 0';
+  bOll.onclick = async () => {
+    olBox.innerHTML = '';
+    let found = [];
+    try { found = await api.models.ollamaFound(); } catch { /* egal */ }
+    if (!found.length) { olBox.textContent = 'Keine Ollama-Modelle auf diesem PC gefunden.'; return; }
+    olBox.appendChild(el('div', null, 'Gefundene Modelle (werden per Verknüpfung übernommen, kein zusätzlicher Platz; manche Ollama-Dateien laufen nicht in der eigenen Engine):'));
+    const boxes = [];
+    for (const m of found) {
+      const l = el('label'); l.style.cssText = 'display:flex;gap:8px;align-items:center;margin:3px 0';
+      const c = document.createElement('input'); c.type = 'checkbox'; boxes.push([c, m.name]);
+      l.append(c, document.createTextNode(`${m.name} (${(m.size / 1024 ** 3).toFixed(1).replace('.', ',')} GB)`));
+      olBox.appendChild(l);
+    }
+    const go = el('button', 'btn small', 'Übernehmen');
+    go.onclick = async () => {
+      go.disabled = true; go.textContent = 'Übernehme …';
+      const n = await api.models.ollamaImport(boxes.filter(([c]) => c.checked).map(([, nm]) => nm));
+      olBox.textContent = `${n} Modell(e) übernommen.`; await ctx.refreshModels(); await load();
+    };
+    olBox.appendChild(go);
+  };
   page.appendChild(dirRow);
+  page.appendChild(olBox);
 
   let all = [];
   const { box: sbox, inp: filter } = searchBox('Installierte Modelle filtern', () => draw());
@@ -342,7 +374,7 @@ export function mountLibrary(root, ctx) {
       const caps = el('span', 'caps');
       meta.appendChild(caps);
       info.appendChild(meta);
-      api.ollama.show(m.name).then((d) => {
+      api.models.show(m.name).then((d) => {
         const map = { vision: 'Bilder', tools: 'Werkzeuge', thinking: 'Denken', embedding: 'Einbettung' };
         for (const c of d.capabilities || []) if (map[c]) caps.appendChild(el('span', 'badge feat', map[c]));
       }).catch(() => {});
@@ -351,15 +383,15 @@ export function mountLibrary(root, ctx) {
       const del = el('button', 'btn small danger', 'Löschen');
       del.onclick = async () => {
         if (!confirm(`Modell „${m.name}“ von der Festplatte löschen?`)) return;
-        try { await api.ollama.remove(m.name); await ctx.refreshModels(); await load(); } catch (e) { ctx.hint('Löschen fehlgeschlagen: ' + cleanErr(e), 0); }
+        try { await api.models.remove(m.name); await ctx.refreshModels(); await load(); } catch (e) { ctx.hint('Löschen fehlgeschlagen: ' + cleanErr(e), 0); }
       };
       row.append(info, use, del);
       box.appendChild(row);
     }
   }
   async function load() {
-    try { all = await api.ollama.models(); }
-    catch { box.innerHTML = ''; box.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); return; }
+    try { all = await api.models.list(); }
+    catch { box.innerHTML = ''; box.appendChild(el('div', 'err', 'Modelle konnten nicht gelesen werden.')); return; }
     draw();
   }
   load();

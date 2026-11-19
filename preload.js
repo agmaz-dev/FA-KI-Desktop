@@ -16,17 +16,20 @@ contextBridge.exposeInMainWorld('api', {
   },
   app: {
     info: inv('app:info'), openDataDir: inv('app:openDataDir'), pickFolder: inv('dialog:pickFolder'),
-    onOllamaStart: on('app:ollamaStart'), onTtsStart: on('app:ttsStart'),
+    onTtsStart: on('app:ttsStart'),
   },
   files: { pick: inv('files:pick') },
   github: { setToken: inv('github:setToken'), test: inv('github:test') },
   agent: { pickDir: inv('agent:pickDir'), clearDir: inv('agent:clearDir'), check: inv('agent:check'), openDir: inv('agent:openDir') },
   hf: { search: inv('hf:search'), details: inv('hf:details'), translate: inv('hf:translate') },
-  ollama: {
-    ensure: inv('ollama:ensure'), status: inv('ollama:status'), models: inv('ollama:models'), show: inv('ollama:show'),
-    remove: inv('ollama:delete'), pull: inv('ollama:pull'), pullCancel: inv('ollama:pullCancel'),
-    onPull: on('ollama:pullProgress'),
+  models: {
+    status: inv('models:status'), list: inv('models:list'), show: inv('models:show'), remove: inv('models:remove'),
+    download: inv('models:download'), cancel: inv('models:cancelDownload'), unload: inv('models:unload'),
+    pickDir: inv('models:pickDir'), resetDir: inv('models:resetDir'), openDir: inv('models:openDir'),
+    ollamaFound: inv('models:ollamaFound'), ollamaImport: inv('models:ollamaImport'),
+    onProgress: on('models:downloadProgress'), onEngine: on('models:engineStatus'),
   },
+
   chat: {
     start: inv('chat:start'), stop: inv('chat:stop'),
     onTool: on('chat:tool'), onDelta: on('chat:delta'), onDone: on('chat:done'), onError: on('chat:error'),

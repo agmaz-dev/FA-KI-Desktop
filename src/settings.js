@@ -107,7 +107,6 @@ export async function openSettings(ctx, startTab = 'general') {
       save.onclick = async () => {
         draft.numCtx = Math.max(2048, parseInt(draft.numCtx, 10) || 16384);
         draft.temperature = Math.min(2, Math.max(0, parseFloat(draft.temperature) || 0));
-        draft.ollamaUrl = (draft.ollamaUrl || '').trim() || 'http://127.0.0.1:11434';
         const next = await api.settings.set(draft);
         saved.textContent = 'Gespeichert ✓';
         ctx.onSaved(next);
@@ -153,13 +152,6 @@ export async function openSettings(ctx, startTab = 'general') {
     const sc = switchRow('Cloud-Modelle in der Liste anzeigen', 'Achtung: Cloud-Modelle senden Deine Daten an fremde Server. Besser aus lassen.', draft.showCloud);
     bind(sc.cb, 'showCloud');
     body.appendChild(sc.row);
-    const url = bind(input('text', draft.ollamaUrl), 'ollamaUrl');
-    const ur = formRow('Adresse von Ollama', url, 'Standard: http://127.0.0.1:11434 (bleibt auf diesem PC).');
-    ur.style.marginTop = '16px';
-    body.appendChild(ur);
-    const ao = switchRow('Ollama mit der App starten', 'Startet Ollama im Hintergrund, falls es nicht läuft (nur bei einer Adresse auf diesem PC).', draft.autoStartOllama);
-    bind(ao.cb, 'autoStartOllama');
-    body.appendChild(ao.row);
   }
 
   // ---------- KI ----------
@@ -171,7 +163,8 @@ export async function openSettings(ctx, startTab = 'general') {
     two.appendChild(formRow('Kontextlänge (Tokens)', bind(input('number', draft.numCtx, { min: 2048, step: 1024 }), 'numCtx'), 'Mehr = längere PDFs, aber langsamer. 16384 ist ein guter Start.'));
     two.appendChild(formRow('Kreativität (Temperatur)', bind(input('number', draft.temperature, { min: 0, max: 2, step: 0.1 }), 'temperature'), '0 = sachlich, 1 = kreativ.'));
     body.appendChild(two);
-    body.appendChild(formRow('Modell im Speicher halten', bind(selectOf([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive), 'keepAlive'), 'Solange bleibt das Modell geladen, damit die nächste Antwort sofort kommt.'));
+    body.appendChild(formRow('Modell im Speicher halten', bind(selectOf([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive), 'keepAlive'), 'Danach wird es aus dem Arbeitsspeicher entladen und beim nächsten Chat automatisch neu geladen.'));
+    body.appendChild(formRow('Modellordner', el('div', 'note', 'Wird in der Bibliothek geändert (Erkunden → Bibliothek → Modellordner).'), ''));
     body.appendChild(formRow('Standard-Denktiefe', bind(selectOf([['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], draft.think), 'think'), 'Bei gpt-oss. Du kannst sie im Chat jederzeit ändern.'));
 
     body.appendChild(el('h3', null, 'Dein PC (für „Erkunden“)'));

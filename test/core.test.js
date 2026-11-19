@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { detectLang, stripMarkdown, splitSentences, fitText, cleanTranscript } = require('../lib/util');
 const { Store } = require('../lib/store');
-const ollama = require('../lib/ollama');
+const { buildThink } = require('../lib/think');
 const { pickWhisperAsset } = require('../lib/speech');
 const { downloadFile } = require('../lib/downloader');
 
@@ -61,38 +61,10 @@ test('Store: Chats & Einstellungen', () => {
   assert.strictEqual(s.listChats().length, 0);
 });
 
-test('Ollama: Streaming, Tags, Fehler, think', async () => {
-  const srv = http.createServer((req, res) => {
-    if (req.url === '/api/tags') { res.end(JSON.stringify({ models: [{ name: 'gpt-oss:20b', size: 5 }] })); return; }
-    if (req.url === '/api/version') { res.end('{"version":"0.0.1"}'); return; }
-    if (req.url === '/api/chat') {
-      let b = ''; req.on('data', (d) => { b += d; });
-      req.on('end', () => {
-        const j = JSON.parse(b);
-        if (j.model === 'bad') { res.statusCode = 404; res.end('{"error":"model not found"}'); return; }
-        res.write(JSON.stringify({ message: { thinking: 'hm' } }) + '\n');
-        res.write(JSON.stringify({ message: { content: 'Hal' } }) + '\n{"message":{"content":"lo"}}\n');
-        res.end(JSON.stringify({ done: true, eval_count: 2, eval_duration: 1e9 }));
-      });
-      return;
-    }
-    res.statusCode = 404; res.end('{}');
-  });
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-  assert.strictEqual(await ollama.version(base), '0.0.1');
-  assert.strictEqual((await ollama.tags(base))[0].name, 'gpt-oss:20b');
-  let text = ''; let think = ''; let done = null;
-  await ollama.chatStream(base, { model: 'x', messages: [] }, (o) => {
-    if (o.message) { text += o.message.content || ''; think += o.message.thinking || ''; }
-    if (o.done) done = o;
-  });
-  assert.strictEqual(text, 'Hallo'); assert.strictEqual(think, 'hm'); assert.strictEqual(done.eval_count, 2);
-  await assert.rejects(ollama.chatStream(base, { model: 'bad', messages: [] }, () => {}), /model not found/);
-  srv.close();
-  assert.strictEqual(ollama.buildThink('gpt-oss:20b', ['thinking'], 'high'), 'high');
-  assert.strictEqual(ollama.buildThink('qwen3', ['thinking'], 'off'), false);
-  assert.strictEqual(ollama.buildThink('gemma', ['completion'], 'high'), undefined);
+test('buildThink: Stufen und Ein/Aus je nach Modell', () => {
+  assert.strictEqual(buildThink('gpt-oss:20b', ['thinking'], 'high'), 'high');
+  assert.strictEqual(buildThink('qwen3', ['thinking'], 'off'), false);
+  assert.strictEqual(buildThink('gemma', ['completion'], 'high'), undefined);
 });
 
 test('Downloader', async () => {
@@ -293,43 +265,6 @@ test('Supertonic: Stopp verwirft laufende und wartende Sätze', async () => {
   // Nach dem Stopp funktioniert neues Vorlesen wieder
   const wav = await s.synthesize('Neu.', 'de', 'elena', 1, 2);
   assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
-});
-
-test('Ollama: Fehler mitten im Stream schließt die Verbindung, Abbruch und Umlaut-Grenze', async () => {
-  let closed = false;
-  const srv = http.createServer((req, res) => {
-    let b = ''; req.on('data', (d) => { b += d; });
-    req.on('end', () => {
-      const j = JSON.parse(b);
-      if (j.model === 'split') {
-        const s = Buffer.from(JSON.stringify({ message: { content: 'Grüße' } }) + '\n');
-        const i = s.indexOf(0xc3);
-        res.write(s.subarray(0, i + 1));
-        setTimeout(() => { res.write(s.subarray(i + 1)); res.end(JSON.stringify({ done: true })); }, 30);
-        return;
-      }
-      res.write(JSON.stringify({ message: { content: 'a' } }) + '\n');
-      if (j.model === 'err') res.write(JSON.stringify({ error: 'out of memory' }) + '\n');
-      const t = setInterval(() => res.write(JSON.stringify({ message: { content: 'x' } }) + '\n'), 20);
-      res.on('close', () => { clearInterval(t); closed = true; });
-    });
-  });
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-  let text = '';
-  await ollama.chatStream(base, { model: 'split', messages: [] }, (o) => { if (o.message) text += o.message.content; });
-  assert.strictEqual(text, 'Grüße');
-  await assert.rejects(ollama.chatStream(base, { model: 'err', messages: [] }, () => {}), /out of memory/);
-  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(closed, 'Verbindung muss nach Fehlerzeile geschlossen werden');
-  closed = false;
-  const c = new AbortController();
-  setTimeout(() => c.abort(), 80);
-  await assert.rejects(ollama.chatStream(base, { model: 'slow', messages: [] }, () => {}, c.signal));
-  assert.ok(c.signal.aborted);
-  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(closed, 'Abbruch muss die Verbindung schließen');
-  srv.close();
 });
 
 test('Türkisch-Wörter mit ç/ğ und Satzteile höchstens maxLen', () => {

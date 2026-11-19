@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     env:
       WHISPER_CPP_REF: v1.9.5 # fest angepinnt, damit der Build reproduzierbar bleibt
+      LLAMA_CPP_TAG: b12530 # fertige Windows-Version (Vulkan, läuft auf AMD/NVIDIA/Intel), fest angepinnt
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,6 +39,15 @@ jobs:
           ls -la build-bundled/whisper
           test -f build-bundled/whisper/whisper-cli.exe
           test -f build-bundled/whisper/whisper-server.exe
+      - name: Eigene Engine (llama.cpp, Vulkan) laden
+        shell: bash
+        run: |
+          mkdir -p llama-dl build-bundled/llama
+          gh release download "$LLAMA_CPP_TAG" --repo ggml-org/llama.cpp --pattern "llama-*-bin-win-vulkan-x64.zip" --dir llama-dl
+          ls -la llama-dl
+          7z x -y llama-dl/*.zip -obuild-bundled/llama > /dev/null
+          find build-bundled/llama -name llama-server.exe
+          test -f build-bundled/llama/llama-server.exe
       - run: npm ci
       - run: npm test
       - run: npm run dist
@@ -48,6 +59,9 @@ jobs:
           ls -la dist/win-unpacked/resources/whisper
           test -f dist/win-unpacked/resources/whisper/whisper-server.exe
           test -f dist/win-unpacked/resources/whisper/whisper-cli.exe
+      - name: Prüfen, ob llama-server im Installer liegt
+        shell: bash
+        run: test -f dist/win-unpacked/resources/llama/llama-server.exe
       - name: Version ermitteln
         id: ver
         shell: bash

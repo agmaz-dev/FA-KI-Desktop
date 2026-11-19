@@ -65,13 +65,26 @@ test('Suche und Details mit nachgebauter Hugging-Face-Antwort', async () => {
   assert.strictEqual(d.quants.length, 2);
   const rec = d.quants.find((x) => x.empfohlen);
   assert.strictEqual(rec.name, 'Q4_K_M'); // Q8_0 hat 15 GB, mit Kontext zu viel für 16 GB
-  assert.strictEqual(rec.pull, 'hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M');
+  assert.strictEqual(rec.pull, 'unsloth/gpt-oss-20b-GGUF:Q4_K_M');
   assert.strictEqual(d.quants.find((x) => x.name === 'Q8_0').fit, 'teils');
   assert.ok(d.readme.startsWith('# Titel'));
   await assert.rejects(() => hf.details('../x', hw, fetchImpl), /Ungültig/);
 });
 
 test('Modellnamen für den Download sind sauber', () => {
-  for (const ok of ['gpt-oss:20b', 'qwen3:14b', 'hf.co/unsloth/gpt-oss-20b-GGUF:Q4_K_M', 'library/llama3']) assert.ok(hf.okPullName(ok), ok);
-  for (const bad of ['', 'a b', '../x', 'x;rm -rf', 'http://evil/x', '-flag']) assert.ok(!hf.okPullName(bad), bad);
+  assert.deepStrictEqual(hf.parsePull('unsloth/gpt-oss-20b-GGUF:q4_k_m'), { id: 'unsloth/gpt-oss-20b-GGUF', quant: 'Q4_K_M' });
+  for (const bad of ['', 'a b', '../x:Q4', 'x;rm -rf', 'http://evil/x', '-flag', 'gpt-oss:20b', 'a/b', 'a/b:', 'a/../b:Q4', 'hf.co/a/b:Q4_K_M']) assert.strictEqual(hf.parsePull(bad), null, bad);
+});
+
+test('Download-Plan: Dateien einer Stufe, Bildteil, fehlende Stufe', async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({ id: 'o/r', tags: ['gguf', 'image-text-to-text'], siblings: [
+    { rfilename: 'r-Q8_0-00002-of-00002.gguf', size: 5 }, { rfilename: 'r-Q8_0-00001-of-00002.gguf', size: 10 },
+    { rfilename: 'r-Q4_K_M.gguf', size: 7 }, { rfilename: 'mmproj-BF16.gguf', size: 3 }, { rfilename: 'mmproj-F16.gguf', size: 2 },
+  ] }));
+  const p = await hf.plan('o/r', 'q8_0', fetchImpl);
+  assert.deepStrictEqual(p.files.map((f) => f.path), ['r-Q8_0-00001-of-00002.gguf', 'r-Q8_0-00002-of-00002.gguf']);
+  assert.strictEqual(p.mmproj.path, 'mmproj-F16.gguf');
+  assert.ok(p.features.includes('Bilder'));
+  await assert.rejects(() => hf.plan('o/r', 'Q2_K', fetchImpl), /gibt es in diesem Repo nicht/);
+  await assert.rejects(() => hf.plan('../x', 'Q4', fetchImpl), /Ungültig/);
 });
