@@ -225,14 +225,14 @@ function registerIpc() {
     if (!t) return { ok: false, error: 'Kein Token gespeichert' };
     try { return { ok: true, login: await github.whoami(t) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
   });
-  ipcMain.handle('mail:setPassword', (_e, pw) => { setMailPassword(String(pw || '').trim()); return publicSettings(store.getSettings()); });
+  ipcMain.handle('mail:setPassword', (_e, pw) => { setMailPassword(String(pw || '').replace(/\s+/g, '')); return publicSettings(store.getSettings()); });
   ipcMain.handle('mail:test', async (_e, cfgIn) => {
     try {
       const cfg = mail.configOf({ ...store.getSettings(), ...(cfgIn || {}) }, getMailPassword());
       const r = await mail.listMail(cfg, { limit: 1 });
       return { ok: true, count: r.length };
     } catch (e) {
-      return { ok: false, error: String(e.message || e) };
+      return { ok: false, error: mail.friendlyError(e) };
     }
   });
   ipcMain.handle('agent:pickDir', async () => {

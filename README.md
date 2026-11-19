@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.1.2
+
+- **E-Mail:** verständliche Fehlermeldung bei abgelehnter Anmeldung (App-Passwort nötig); Leerzeichen im App-Passwort werden entfernt.
+
 ## Neu in 2.1.1
 
 - **Browser:** Globus-Knopf oben im Chat öffnet das Seitenfenster als Browser mit Adressleiste (Adresse oder Suchbegriff), Zurück, Vor, Neu laden.
