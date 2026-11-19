@@ -285,6 +285,11 @@ function fillMsg(wrap, m, live = false, isLast = false) {
     body.appendChild(d);
     if (open && live) requestAnimationFrame(() => { tt.scrollTop = tt.scrollHeight; });
   }
+  if (m.tools && m.tools.length) {
+    const tl = el('div', 'chips');
+    for (const t of m.tools) { const c = el('span', 'chip'); c.appendChild(document.createTextNode(t)); tl.appendChild(c); }
+    body.appendChild(tl);
+  }
   const md = el('div', 'md');
   md.innerHTML = renderMd(m.content);
   md.querySelectorAll('pre').forEach((pre) => {
@@ -437,7 +442,8 @@ async function runAssistant() {
     keep_alive: ka === '-1' ? -1 : ka,
   };
   if (think !== undefined) body.think = think;
-  api.chat.start({ id, body });
+  const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false);
+  api.chat.start({ id, body, useTools });
   api.chats.save(state.chat);
 }
 
@@ -463,6 +469,13 @@ function scheduleRender() {
     if (nearBottom) box.scrollTop = box.scrollHeight;
   });
 }
+
+api.chat.onTool(({ id, label }) => {
+  const s = state.streaming;
+  if (!s || s.id !== id) return;
+  (s.asst.tools = s.asst.tools || []).push(label);
+  scheduleRender();
+});
 
 api.chat.onDelta(({ id, content, thinking }) => {
   const s = state.streaming;

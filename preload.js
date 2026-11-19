@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
     onOllamaStart: on('app:ollamaStart'), onTtsStart: on('app:ttsStart'),
   },
   files: { pick: inv('files:pick') },
+  github: { setToken: inv('github:setToken'), test: inv('github:test') },
   ollama: {
     ensure: inv('ollama:ensure'), status: inv('ollama:status'), models: inv('ollama:models'), show: inv('ollama:show'),
     remove: inv('ollama:delete'), pull: inv('ollama:pull'), pullCancel: inv('ollama:pullCancel'),
@@ -26,7 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   chat: {
     start: inv('chat:start'), stop: inv('chat:stop'),
-    onDelta: on('chat:delta'), onDone: on('chat:done'), onError: on('chat:error'),
+    onTool: on('chat:tool'), onDelta: on('chat:delta'), onDone: on('chat:done'), onError: on('chat:error'),
   },
   ocr: { run: inv('ocr:run') },
   voice: { status: inv('voice:status'), setup: inv('voice:setup'), cancel: inv('voice:cancel'), cleanOld: inv('voice:cleanOld'), onProgress: on('voice:progress') },

@@ -87,6 +87,14 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 ## Neu in 1.8.9
 - Piper: Stimmen, die das mitgelieferte Sprachprogramm nicht lesen kann (Kerstin „medium“), werden übersprungen und durch die passende Version (Kerstin „low“) ersetzt. Die bevorzugte Stimme (Kerstin, dfki) wird beim Start still nachgeladen, falls sie fehlt.
 
+## Neu in 1.9.0 – Internet und GitHub
+
+- **Internetsuche ohne Schlüssel und ohne Konto:** Modelle mit Werkzeug-Unterstützung (gpt-oss, Qwen) können im Web suchen und Seiten lesen. Die App fragt DuckDuckGo direkt ab, bei Sperre weicht sie auf DuckDuckGo Lite und Bing aus. Quellen kommen als anklickbare Links in den Chat; im Antwortkopf steht, welche Suchen und Seiten benutzt wurden.
+- **Shop-Links:** Die KI baut aus dem Suchbegriff fertige Links für eBay, Kleinanzeigen, Amazon und idealo. Du klickst selbst darauf, es wird nichts abgerufen.
+- **GitHub nur lesen:** Repos auflisten, Dateien und Ordner lesen, Code und Repos suchen. Es gibt keine Funktion, die etwas schreibt oder löscht. Der Token (nur Leserechte) kommt unter Einstellungen → KI und Modell → Internet und GitHub, wird mit den Windows-Anmeldedaten verschlüsselt gespeichert und nie an die Oberfläche oder das Modell gegeben.
+- **Sicherheit:** Adressen im eigenen Netz und auf dem PC (localhost, 192.168…, 169.254…) sind für den Seitenabruf gesperrt, auch bei Weiterleitungen. Texte aus dem Netz werden dem Modell als nicht vertrauenswürdige Daten übergeben.
+- Beide Funktionen lassen sich in den Einstellungen einzeln ausschalten.
+
 ## Neu in 1.8.11
 **Spracherkennung (Whisper)**
 - Umlaute bleiben heil: Aus „Grüße“ wurde manchmal „Gr��ße“, wenn ein „ü“ genau an einer Blockgrenze der Ausgabe lag.
