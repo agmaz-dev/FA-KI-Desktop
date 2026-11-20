@@ -176,9 +176,15 @@ jobs:
           APP="$(ls -d dist/mac-arm64/*.app | head -1)"
           EXE="$APP/Contents/MacOS/$(basename "$APP" .app)"
           R="$RUNNER_TEMP/smoke.txt"; rm -f "$R"
-          FA_SMOKE="$R" perl -e 'alarm 120; exec @ARGV' "$EXE" || true
-          cat "$R" || true
-          grep -q FA_SMOKE_OK "$R"
+          FA_SMOKE="$R" ELECTRON_ENABLE_LOGGING=1 perl -e 'alarm 120; exec @ARGV' "$EXE" > "$RUNNER_TEMP/app-out.txt" 2>&1; echo "Exit-Code: $?"
+          echo "--- Ausgabe der App ---"; tail -60 "$RUNNER_TEMP/app-out.txt" || true
+          echo "--- Ergebnis ---"; cat "$R" || true
+          if ! grep -q FA_SMOKE_OK "$R" 2>/dev/null; then
+            echo "--- Module einzeln laden ---"
+            ELECTRON_RUN_AS_NODE=1 "$EXE" -e "for (const m of ['lib/store','lib/engine','lib/mcp','lib/gdrive','lib/hf','lib/voxtral','lib/phonon','lib/tools','lib/speech']) { try { require('$APP/Contents/Resources/app/' + m); console.log('ok', m); } catch (e) { console.log('FEHLER', m, e.stack); } }" || true
+            echo "--- Absturzberichte ---"; ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | head -5; f=$(ls -t ~/Library/Logs/DiagnosticReports/*FA* 2>/dev/null | head -1); [ -n "$f" ] && head -80 "$f"
+            exit 1
+          fi
       - name: Version ermitteln
         id: ver
         run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
