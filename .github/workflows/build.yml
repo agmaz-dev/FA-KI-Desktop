@@ -173,7 +173,7 @@ jobs:
           ls -la dist/*.dmg
       - name: App-Start prüfen (Fenster geht auf)
         run: |
-          APP="$(ls -d dist/mac-arm64/*.app | head -1)"
+          APP="$PWD/$(ls -d dist/mac-arm64/*.app | head -1)"
           EXE="$APP/Contents/MacOS/$(basename "$APP" .app)"
           R="$RUNNER_TEMP/smoke.txt"; rm -f "$R"
           FA_SMOKE="$R" ELECTRON_ENABLE_LOGGING=1 perl -e 'alarm 120; exec @ARGV' "$EXE" > "$RUNNER_TEMP/app-out.txt" 2>&1; echo "Exit-Code: $?"

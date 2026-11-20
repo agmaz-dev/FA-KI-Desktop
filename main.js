@@ -1,4 +1,6 @@
 'use strict';
+// Starttest (CI): sehr früh protokollieren, auch wenn ein require scheitert
+if (process.env.FA_SMOKE) { try { require('fs').appendFileSync(process.env.FA_SMOKE, 'LOG main.js startet ' + process.versions.electron + '\n'); } catch { /* egal */ } }
 const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage, nativeTheme, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -146,8 +148,10 @@ function startFailed(e) {
 process.on('uncaughtException', (e) => { startLog('uncaughtException ' + String((e && e.stack) || e)); if (!win) startFailed(e); });
 process.on('unhandledRejection', (e) => startLog('unhandledRejection ' + String((e && e.stack) || e)));
 
+smoke('LOG Module geladen');
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  smoke('LOG zweite Instanz – beende');
   app.quit();
 } else {
   app.on('second-instance', () => {
