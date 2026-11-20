@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.3
+- **Start abgesichert:** Läuft schon eine FA-KI-Instanz ohne Fenster, öffnet ein erneuter Start (oder ein Klick aufs Dock-Symbol) ein Fenster. Scheitert der Start, zeigt die App eine Fehlermeldung und schreibt `start-protokoll.log` in den Datenordner.
+- Die Installer werden in der CI jetzt auch gestartet: Erst wenn das Fenster aufgeht, gilt der Build als gut.
+
 ## Neu in 2.5.2
 - **Erkunden findet mehr:** „Weitere laden“ holt beliebig viele Treffer (je 100). Ohne Treffer mit Leerzeichen („qwen 3.5“) wird auch „qwen3.5“ versucht.
 - **Alle Modelldateien ladbar:** Auch neue Formate (NVFP4, FP16, TQ1_0, „4bpw“ …) und Dateien ohne Stufe im Namen erscheinen als Download-Option. Hilfsdateien (imatrix, MTP-Entwürfe, LoRA, Tokenizer) werden ausgeblendet; enthält ein Repo nur solche, sagt die App das klar.

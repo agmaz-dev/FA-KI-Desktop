@@ -68,7 +68,6 @@ function createWindow() {
     backgroundColor: glass ? '#00000000' : (store.getSettings().theme === 'light' ? '#ffffff' : '#1e1e20'),
     ...(process.platform === 'darwin' ? { vibrancy: 'sidebar', visualEffectState: 'active', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
     ...(glass && process.platform === 'win32' ? { backgroundMaterial: 'acrylic' } : {}),
-    icon: path.join(__dirname, 'build-assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     title: 'FA KI Desktop',
     autoHideMenuBar: true,
     webPreferences: {
@@ -154,9 +153,14 @@ if (!gotLock) {
   smoke('LOG zweite Instanz – beende');
   app.quit();
 } else {
+  // Zweiter Start: vorhandenes Fenster nach vorn holen – oder ein neues öffnen, falls keins (mehr) da ist
   app.on('second-instance', () => {
-    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    startLog('Zweiter Start erkannt');
+    if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
+    else if (store) createWindow();
   });
+  // Mac: Klick aufs Dock-Symbol ohne offenes Fenster öffnet eins
+  app.on('activate', () => { if ((!win || win.isDestroyed()) && store) createWindow(); });
   app.whenReady().then(() => {
     startLog(`Start ${app.getVersion()} auf ${process.platform} ${os.release()}`);
     const dataDir = app.getPath('userData');
