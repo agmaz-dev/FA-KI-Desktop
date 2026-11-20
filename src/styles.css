@@ -397,3 +397,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 #panelBody { flex: 1; min-height: 0; background: var(--bg); }
 .in-settings #panel, .in-settings #panelSplit { display: none !important; }
 .prevbtn { right: 84px !important; }
+/* Mehrere Downloads (2.5.0) */
+.dl-item { padding: 6px 0; }
+.dl-item + .dl-item { border-top: 1px solid var(--line); }
+.dl-item .dl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dlw-sum { font-weight: 600; margin-bottom: 4px; }
+.dl-status:empty { display: none; }
+.dl-status { border: 1px solid var(--line); border-radius: 10px; padding: 4px 12px; margin: 8px 0; }

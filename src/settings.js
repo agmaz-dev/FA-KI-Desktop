@@ -58,6 +58,8 @@ export async function openSettings(ctx, startTab = 'general') {
 
   let vstat = { installed: false, busy: false };
   const ST = (window.__stUi = window.__stUi || { running: false, done: '' });
+  const PH = (window.__phUi = window.__phUi || { running: false, done: '' });
+  const VX = (window.__vxUi = window.__vxUi || { running: false, done: '' });
   const VU = (window.__voiceUi = window.__voiceUi || { text: '', pct: null, running: false, done: '' });
   if (!window.__voiceSub) {
     window.__voiceSub = api.voice.onProgress((p) => {
@@ -378,12 +380,22 @@ export async function openSettings(ctx, startTab = 'general') {
   // ---------- Sprache ----------
   function speech(body, st) {
     body.appendChild(el('h2', null, 'Sprache'));
-    body.appendChild(formRow('Stimme beim Vorlesen', bind(selectOf([['auto', 'Automatisch (Deutsch/Türkisch)'], ['de', 'Immer Deutsch'], ['tr', 'Immer Türkisch'], ['windows', 'Nur Windows-Stimme']], draft.ttsVoice), 'ttsVoice')));
-    const sp = input('range', draft.ttsSpeed, { min: 0.7, max: 1.5, step: 0.05 });
-    const spl = el('div', 'note', `Tempo: ${Number(draft.ttsSpeed).toFixed(2).replace('.', ',')}×`);
-    sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `Tempo: ${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
-    const spr = formRow('Sprechtempo', sp); spr.appendChild(spl);
-    body.appendChild(spr);
+    const isMac = /Mac/i.test(navigator.platform);
+    const engines = [['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['phonon', 'Phonon (Anton, Nele … – mehrsprachig)']];
+    if (!isMac) engines.push(['server', 'Meine Stimme (OuteTTS, Deutsch)']);
+    const engVal = engines.some(([k]) => k === draft.ttsEngine) ? draft.ttsEngine : 'supertonic';
+    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf(engines, engVal), 'ttsEngine'), 'Türkisch spricht immer Supertonic. Ist der gewählte Motor nicht bereit, springt Supertonic ein.'));
+    body.appendChild(formRow('Stimme beim Vorlesen', bind(selectOf([['auto', 'Automatisch (Deutsch/Türkisch)'], ['de', 'Immer Deutsch'], ['tr', 'Immer Türkisch'], ['windows', isMac ? 'Nur System-Stimme' : 'Nur Windows-Stimme']], draft.ttsVoice), 'ttsVoice')));
+    // Tempo: bei Phonon „Wiedergabegeschwindigkeit“ in der Phonon-Karte, sonst hier
+    const speedRow = (label) => {
+      const sp = input('range', draft.ttsSpeed, { min: 0.7, max: 1.5, step: 0.05 });
+      const spl = el('div', 'note', `${Number(draft.ttsSpeed).toFixed(2).replace('.', ',')}×`);
+      sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
+      const r = formRow(label, sp); r.appendChild(spl);
+      return r;
+    };
+    if (engVal !== 'phonon') body.appendChild(speedRow('Sprechtempo'));
+    body.appendChild(phononCard(st, speedRow));
     const stc = el('div', 'voice-card');
     stc.appendChild(el('h3', null, 'Supertonic – schnelle, natürliche Stimmen (Deutsch und Türkisch)'));
     stc.appendChild(el('div', 'note', 'Läuft direkt in der App, ganz ohne Zusatzprogramme, spricht flüssig und braucht wenig Speicher. Einmaliger Download von ca. 250 MB.'));
@@ -457,9 +469,8 @@ export async function openSettings(ctx, startTab = 'general') {
       vc.appendChild(bOld);
     }
     vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
-    const isMac = /Mac/i.test(navigator.platform);
     if (!isMac) body.appendChild(vc);
-    if (!isMac) body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf([['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['server', 'Meine Stimme (OuteTTS, Deutsch)']], draft.ttsEngine === 'server' ? 'server' : 'supertonic'), 'ttsEngine'), 'Bei „Meine Stimme“ spricht Supertonic automatisch Türkisch und springt ein, falls OuteTTS nicht bereit ist.'));
+
     const test = el('button', 'btn small', 'Stimme testen');
     test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
     const stopT = el('button', 'btn small', 'Stopp');
@@ -467,11 +478,14 @@ export async function openSettings(ctx, startTab = 'general') {
     const tr = el('div', 'chips-row'); tr.append(test, stopT);
     body.appendChild(tr);
 
-    // ----- Spracherkennung (Whisper) -----
-    body.appendChild(el('h3', null, 'Spracherkennung (Whisper)'));
+    // ----- Spracherkennung (Whisper oder Voxtral) -----
+    body.appendChild(el('h3', null, 'Spracherkennung (Diktieren)'));
+    const sttEng = draft.sttEngine === 'voxtral' ? 'voxtral' : 'whisper';
+    body.appendChild(formRow('Erkennung mit', bindRender(selectOf([['whisper', 'Whisper (whisper.cpp)'], ['voxtral', 'Voxtral Realtime (Mistral, sehr schnell)']], sttEng), 'sttEngine'), 'Wird für das Diktieren und den Gesprächsmodus benutzt. Beides läuft ganz auf diesem Rechner.'));
+    if (sttEng === 'voxtral') body.appendChild(voxtralCard(st));
     const wc = el('div', 'voice-card');
     wc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:6px 0 16px';
-    wc.appendChild(el('div', 'note', 'Wandelt Gesprochenes in Text um, für das Diktieren und den Gesprächsmodus. Läuft ganz auf diesem PC. Der Bildschirm bleibt dabei bedienbar.'));
+    wc.appendChild(el('div', 'note', sttEng === 'voxtral' ? 'Mikrofon (gilt für Voxtral und Whisper):' : 'Whisper wandelt Gesprochenes in Text um. Läuft ganz auf diesem PC. Der Bildschirm bleibt dabei bedienbar.'));
     const wmodel = draft.sttModel in st.info.whisperModels ? draft.sttModel : 'medium';
     const names = { base: 'Schnell', small: 'Ausgewogen', medium: 'Genau' };
     const wsel = selectOf(Object.keys(st.info.whisperModels).map((k) => [k, `${k[0].toUpperCase() + k.slice(1)} · ${names[k] || ''} (${st.info.whisperModels[k].approx})${st.whisperModels[k] ? ' – geladen' : ''}`]), wmodel);
@@ -479,7 +493,7 @@ export async function openSettings(ctx, startTab = 'general') {
     const wtwo = el('div', 'two');
     wtwo.appendChild(formRow('Modell', wsel, 'Medium ist am genauesten, besonders bei Türkisch und Dialekt.'));
     wtwo.appendChild(formRow('Sprache beim Diktieren', bind(selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], draft.sttLang), 'sttLang')));
-    wc.appendChild(wtwo);
+    if (sttEng === 'whisper') wc.appendChild(wtwo);
     const micSel = selectOf([['', 'Standard von Windows']], draft.micId || '');
     micSel.addEventListener('change', () => { draft.micId = micSel.value; });
     const micRow = formRow('Mikrofon', micSel, 'Wähle hier Dein Mikrofon, falls beim Diktieren nichts oder nur „Musik“ erkannt wird.');
@@ -509,6 +523,7 @@ export async function openSettings(ctx, startTab = 'general') {
       micTest.disabled = false;
     };
     wc.appendChild(micRow);
+    if (sttEng === 'voxtral') { body.appendChild(wc); return speechTail(body); }
     const ready = !!(st.whisperBinary && st.whisperModels[wmodel]);
     const wrow = el('div', 'chips-row');
     wrow.style.alignItems = 'center';
@@ -523,12 +538,136 @@ export async function openSettings(ctx, startTab = 'general') {
     wrow.appendChild(wb);
     wc.appendChild(wrow);
     body.appendChild(wc);
+    speechTail(body);
+  }
+
+  function speechTail(body) {
     const as = switchRow('Diktierten Text sofort senden', 'Aus: der Text erscheint zuerst im Eingabefeld.', draft.autoSend);
     bind(as.cb, 'autoSend');
     body.appendChild(as.row);
     const ta = switchRow('Antworten automatisch vorlesen', 'Auch über das Lautsprecher-Symbol unter dem Eingabefeld schaltbar.', draft.ttsAuto);
     bind(ta.cb, 'ttsAuto');
     body.appendChild(ta.row);
+  }
+
+  const card = () => { const c = el('div', 'voice-card'); c.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px'; return c; };
+  const sec = (x) => Number(x).toFixed(1).replace('.', ',');
+
+  // ---------- Phonon (Vorlesen) ----------
+  function phononCard(st, speedRow) {
+    const ph = st.phonon || { ready: false, voices: [], langs: [] };
+    const c = card();
+    const head = el('div', 'dl-head');
+    head.appendChild(el('h3', null, 'Phonon – mehrsprachige Sprachausgabe'));
+    head.appendChild(el('span', 'badge ' + (ph.ready ? 'ok' : ''), ph.ready ? 'Heruntergeladen' : 'Nicht geladen'));
+    c.appendChild(head);
+    c.appendChild(el('div', 'note', `gradium/phonon-40m-multilingual · ${ph.approx || '75 MB'} · Lizenz ${ph.license || 'CC BY-NC 4.0'} · spricht Deutsch, Englisch, Französisch, Spanisch, Portugiesisch. Läuft nach dem Download ganz offline auf diesem Rechner.`));
+    if (!ph.binary) c.appendChild(el('div', 'err', 'Das Phonon-Programm fehlt in dieser Installation.'));
+
+    // Hugging-Face-Token (das Modell ist geschützt: Bedingungen einmal auf Hugging Face akzeptieren)
+    const tokRow = el('div', 'inline');
+    const tok = input('password', '', { placeholder: draft.hfHasToken ? 'Token ist gespeichert (verschlüsselt)' : 'hf_…' });
+    tok.autocomplete = 'off';
+    const tokSave = el('button', 'btn small', 'Token speichern');
+    const tokDel = el('button', 'btn small', 'Entfernen');
+    tokDel.style.display = draft.hfHasToken ? '' : 'none';
+    const tokMsg = el('div', 'note', draft.hfHasToken ? 'Hugging-Face-Token ist gespeichert. Er wird nur für Downloads von Hugging Face benutzt.' : 'Für Phonon nötig: Auf huggingface.co anmelden, auf der Seite gradium/phonon-40m-multilingual die Bedingungen akzeptieren, dann unter Settings → Access Tokens ein Token (Read) erstellen und hier eintragen.');
+    tokSave.onclick = async () => {
+      tokSave.disabled = true; tokMsg.textContent = 'Prüfe Token …';
+      const r = await api.hf.setToken(tok.value);
+      tokSave.disabled = false;
+      if (r.ok) { draft.hfHasToken = !!tok.value.trim(); tok.value = ''; tokMsg.textContent = r.name ? `Gespeichert (Konto: ${r.name}).` : 'Entfernt.'; tokDel.style.display = draft.hfHasToken ? '' : 'none'; tok.placeholder = draft.hfHasToken ? 'Token ist gespeichert (verschlüsselt)' : 'hf_…'; }
+      else tokMsg.textContent = 'Fehler: ' + r.error;
+    };
+    tokDel.onclick = async () => { await api.hf.setToken(''); draft.hfHasToken = false; tokMsg.textContent = 'Token entfernt.'; tokDel.style.display = 'none'; tok.placeholder = 'hf_…'; };
+    tokRow.append(tok, tokSave, tokDel);
+    const tr = formRow('Hugging-Face-Token', tokRow); tr.appendChild(tokMsg);
+    c.appendChild(tr);
+
+    const two = el('div', 'two');
+    const langs = [['auto', 'Automatisch (Deutsch)'], ...(ph.langs || [])];
+    two.appendChild(formRow('Textsprache', bind(selectOf(langs, draft.ttsPhononLang || 'auto'), 'ttsPhononLang'), 'Bestimmt, wie Zahlen, Datum und Zeichen gelesen werden. Türkischen Text liest Supertonic.'));
+    const vsel = selectOf((ph.voices || []).map((v) => [v.key, `${v.name} (${v.lang === 'de' ? 'Deutsch' : 'Englisch'}, ${v.gender === 'w' ? 'weiblich' : 'männlich'})`]), draft.ttsPhononVoice || 'anton');
+    bind(vsel, 'ttsPhononVoice');
+    const prev = el('button', 'btn small', 'Vorschau');
+    prev.disabled = !ph.ready;
+    const prevMsg = el('span', 'note', '');
+    prev.onclick = async () => {
+      prev.disabled = true; prevMsg.textContent = 'Erzeuge …';
+      try {
+        const t0 = Date.now();
+        const wav = await api.phonon.preview({ voice: vsel.value, lang: draft.ttsPhononLang });
+        prevMsg.textContent = `(${sec((Date.now() - t0) / 1000)} s)`;
+        const { playPreview } = await import('./audio.js');
+        await playPreview(wav, draft.ttsSpeed || 1);
+      } catch (e) { prevMsg.textContent = 'Fehler: ' + String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+      prev.disabled = false;
+    };
+    const vrow = el('div', 'inline'); vrow.append(vsel, prev, prevMsg);
+    two.appendChild(formRow('Stimme', vrow));
+    c.appendChild(two);
+    if (draft.ttsEngine === 'phonon') c.appendChild(speedRow('Wiedergabegeschwindigkeit'));
+
+    const note = el('div', 'note', PH.done || '');
+    const go = el('button', 'btn small' + (ph.ready ? '' : ' primary'), ph.ready ? 'Neu laden / reparieren' : 'Herunterladen');
+    const stop = el('button', 'btn small', 'Abbrechen');
+    const del = el('button', 'btn small danger', 'Entfernen');
+    go.disabled = PH.running || !ph.binary;
+    stop.style.display = PH.running ? '' : 'none';
+    del.style.display = ph.model && !PH.running ? '' : 'none';
+    stop.onclick = () => api.phonon.cancel();
+    del.onclick = async () => { if (!confirm('Phonon (Modell und Stimmen) löschen?')) return; const n = await api.phonon.remove(); Object.assign(draft, { ttsEngine: n.ttsEngine }); PH.done = 'Phonon wurde entfernt.'; render(); };
+    go.onclick = async () => {
+      if (!draft.hfHasToken && !confirm('Es ist noch kein Hugging-Face-Token gespeichert. Phonon ist geschützt und lässt sich ohne Token meist nicht laden. Trotzdem versuchen?')) return;
+      PH.running = true; PH.done = 'Wird geladen …';
+      await api.settings.set({ ttsPhononVoice: vsel.value });
+      render();
+      const r = await api.phonon.setup();
+      PH.running = false;
+      ctx.hideProgress();
+      if (r.ok) { Object.assign(draft, { ttsEngine: 'phonon' }); PH.done = `Fertig. Erster Testsatz: ${sec(r.seconds)} s. Phonon ist jetzt der Stimmen-Motor.`; }
+      else PH.done = 'Fehler: ' + r.error;
+      render();
+    };
+    const row = el('div', 'chips-row'); row.append(go, stop, del);
+    c.append(row, note);
+    return c;
+  }
+
+  // ---------- Voxtral (Diktieren) ----------
+  function voxtralCard(st) {
+    const vx = st.voxtral || { ready: false };
+    const c = card();
+    const head = el('div', 'dl-head');
+    head.appendChild(el('h3', null, 'Voxtral Mini 4B Realtime'));
+    head.appendChild(el('span', 'badge ' + (vx.ready ? 'ok' : 'warn'), vx.ready ? 'Heruntergeladen' : 'Nicht geladen'));
+    c.appendChild(head);
+    const isMac = /Mac/i.test(navigator.platform);
+    c.appendChild(el('div', 'note', `mistralai/Voxtral-Mini-4B-Realtime-2602 · ${vx.approx || '3,6 GB'} (GGUF Q4_K_M) · Lizenz Apache 2.0 · 13 Sprachen, erkennt die Sprache selbst. Läuft in der eingebauten Engine auf der Grafikkarte (${isMac ? 'Metal' : 'Vulkan'}), ganz offline.`));
+    if (isMac) c.appendChild(el('div', 'note', 'Hinweis Mac: Voxtral belegt beim Diktieren etwa 4 GB vom gemeinsamen Arbeitsspeicher. Bei 16 GB passt daneben ein Chatmodell bis etwa 8 GB gut; bei größeren Modellen wird es eng.'));
+    if (!vx.engine) c.appendChild(el('div', 'err', 'Die Engine (llama-server) fehlt in dieser Installation.'));
+    const note = el('div', 'note', VX.done || '');
+    const go = el('button', 'btn small' + (vx.ready ? '' : ' primary'), vx.ready ? 'Neu laden / prüfen' : 'Herunterladen');
+    const stop = el('button', 'btn small', 'Abbrechen');
+    const del = el('button', 'btn small danger', 'Entfernen');
+    go.disabled = VX.running || !vx.engine;
+    stop.style.display = VX.running ? '' : 'none';
+    del.style.display = vx.ready && !VX.running ? '' : 'none';
+    stop.onclick = () => api.voxtral.cancel();
+    del.onclick = async () => { if (!confirm('Voxtral (3,6 GB) löschen? Diktiert wird dann wieder mit Whisper.')) return; const n = await api.voxtral.remove(); draft.sttEngine = n.sttEngine; VX.done = 'Voxtral wurde entfernt.'; render(); };
+    go.onclick = async () => {
+      VX.running = true; VX.done = 'Wird geladen … (setzt einen abgebrochenen Download fort)';
+      render();
+      const r = await api.voxtral.setup();
+      VX.running = false;
+      ctx.hideProgress();
+      if (r.ok) { draft.sttEngine = 'voxtral'; VX.done = `Fertig. Voxtral ist gestartet (${sec(r.seconds)} s) und diktiert ab jetzt. Klick unten auf „Speichern“.`; }
+      else VX.done = 'Fehler: ' + r.error;
+      render();
+    };
+    const row = el('div', 'chips-row'); row.append(go, stop, del);
+    c.append(row, note);
+    return c;
   }
 
   // ---------- Daten ----------

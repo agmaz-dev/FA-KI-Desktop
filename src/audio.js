@@ -159,11 +159,14 @@ function speakWindows(text, lang, rate, token) {
   });
 }
 
-function playBytes(bytes, token) {
+function playBytes(bytes, token, rate = 1) {
   return new Promise((resolve) => {
     if (token !== session) return resolve();
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = new Audio(url);
+    // Wiedergabegeschwindigkeit (Phonon): schneller/langsamer abspielen, Tonhöhe bleibt gleich.
+    a.preservesPitch = true;
+    a.playbackRate = Math.min(2, Math.max(0.5, Number(rate) || 1));
     let finished = false;
     const done = () => { if (!finished) { finished = true; URL.revokeObjectURL(url); resolve(); } };
     playing = { audio: a, done };
@@ -171,6 +174,17 @@ function playBytes(bytes, token) {
     a.onerror = done;
     a.play().catch(done);
   });
+}
+
+/** Spielt fertige WAV-Bytes ab (z. B. Vorschau einer Stimme). Ein Stopp beendet auch das. */
+export async function playPreview(bytes, rate = 1, onState) {
+  stopSpeaking();
+  const token = session;
+  stateCb = onState || null;
+  onState && onState(true);
+  try { await playBytes(bytes, token, rate); } finally {
+    if (token === session) { playing = null; if (stateCb) { const cb = stateCb; stateCb = null; cb(false); } }
+  }
 }
 
 /**
@@ -189,6 +203,9 @@ function shortFirst(sentences) {
 }
 
 export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'supertonic', onState, onWarn } = {}) {
+  // Phonon erzeugt immer im normalen Tempo, die Geschwindigkeit gilt beim Abspielen.
+  const playRate = engine === 'phonon' ? speed : 1;
+  const synthSpeed = engine === 'phonon' ? 1 : speed;
   stopSpeaking();
   const token = session;
   await cancelP;
@@ -196,10 +213,10 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const serverMode = (engine === 'server' || engine === 'supertonic') && voicePref !== 'windows';
+  const serverMode = (engine === 'server' || engine === 'supertonic' || engine === 'phonon') && voicePref !== 'windows';
   const useSrv = serverMode;
   let warned = false;
-  const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });
+  const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed: synthSpeed });
   const synth = async (t) => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (token !== session) return null;
@@ -236,7 +253,7 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
         const cur = await jobs[i];
         if (token !== session) return;
         pump(i + depth);
-        if (cur) await playBytes(cur, token);
+        if (cur) await playBytes(cur, token, playRate);
         else {
           if (token !== session) return;
           await speakWindows(sentences[i], lang, speed, token);

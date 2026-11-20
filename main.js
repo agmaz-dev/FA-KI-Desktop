@@ -6,12 +6,15 @@ const { Store, DEFAULT_SETTINGS } = require('./lib/store');
 const { Engine, findServerExe } = require('./lib/engine');
 const { ModelStore, findOllamaModels, importOllamaModel } = require('./lib/modelstore');
 const { downloadModel } = require('./lib/download');
+const { DownloadQueue } = require('./lib/dlqueue');
 const { SpeechManager, VOICES } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
 const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
 const { VoiceInstaller } = require('./lib/voiceinstall');
 const { Supertonic } = require('./lib/supertonic');
+const { Phonon } = require('./lib/phonon');
+const { Voxtral } = require('./lib/voxtral');
 const tools = require('./lib/tools');
 const github = require('./lib/github');
 const agent = require('./lib/agent');
@@ -25,13 +28,15 @@ let win = null;
 let store = null;
 let speech = null;
 const chatControllers = new Map();
-let pullController = null;
+let dlQueue = null;
 let models = null;
 let engine = null;
 let panel = null;
 let ocrWorker = null;
 let voiceInst = null;
 let supertonic = null;
+let phonon = null;
+let voxtral = null;
 const procs = new Procs();
 
 const send = (ch, payload) => {
@@ -117,6 +122,9 @@ if (!gotLock) {
     });
     supertonic = new Supertonic(dataDir, (p) => send('speech:progress', p));
     speech = new SpeechManager(dataDir, (p) => send('speech:progress', p), app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled'));
+    const bundled = app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled');
+    phonon = new Phonon(dataDir, bundled, (p) => send('speech:progress', p));
+    voxtral = new Voxtral(dataDir, () => findServerExe(process.resourcesPath, __dirname), (p) => send('speech:progress', p));
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       cb(permission === 'media' || permission === 'clipboard-sanitized-write');
@@ -130,7 +138,7 @@ if (!gotLock) {
     // Reste älterer Versionen (Piper-Programm und Piper-Stimmen) entfernen
     for (const d of ['piper', 'voices']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
     // Spracherkennung vorwärmen: whisper-server lädt das Modell einmal und behält es im Speicher.
-    setTimeout(() => { speech.warmStt(store.getSettings().sttModel); }, 3000);
+    setTimeout(() => { warmStt(); }, 3000);
     let st = store.getSettings();
     if (st.ttsEngine === 'piper') { store.setSettings({ ttsEngine: 'supertonic' }); st = store.getSettings(); }
     // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Supertonic
@@ -153,7 +161,7 @@ if (!gotLock) {
 }
 
 // Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
-const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc', 'agentDir', 'modelDir', 'mailPasswordEnc']);
+const MAIN_ONLY_SETTINGS = new Set(['ttsServerCmd', 'ttsServerDir', 'githubTokenEnc', 'agentDir', 'modelDir', 'mailPasswordEnc', 'hfTokenEnc']);
 
 // GitHub-Token: verschlüsselt (Windows-Anmeldedaten) im Hauptprozess; die Oberfläche sieht ihn nie.
 function getGithubToken() {
@@ -177,6 +185,20 @@ function setMailPassword(pw) {
   let enc = '';
   if (pw) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(pw).toString('base64') : 'raw:' + pw;
   store.setSettings({ mailPasswordEnc: enc });
+}
+// Hugging-Face-Token: genauso verschlüsselt; wird nur für Downloads von Hugging Face benutzt (z. B. das geschützte Phonon-Modell).
+function getHfToken() {
+  const enc = store.getSettings().hfTokenEnc || '';
+  try {
+    if (enc.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(enc.slice(4), 'base64'));
+    if (enc.startsWith('raw:')) return enc.slice(4);
+  } catch { /* nicht lesbar */ }
+  return '';
+}
+function setHfToken(token) {
+  let enc = '';
+  if (token) enc = safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(token).toString('base64') : 'raw:' + token;
+  store.setSettings({ hfTokenEnc: enc });
 }
 function setGithubToken(token) {
   let enc = '';
@@ -205,8 +227,8 @@ async function confirmAction(chatId, req) {
 
 /** Einstellungen für die Oberfläche: ohne Token, mit Hinweis, ob einer da ist. */
 function publicSettings(s) {
-  const { githubTokenEnc, mailPasswordEnc, ...rest } = s;
-  return { ...rest, githubHasToken: !!githubTokenEnc, mailHasPassword: !!mailPasswordEnc };
+  const { githubTokenEnc, mailPasswordEnc, hfTokenEnc, ...rest } = s;
+  return { ...rest, githubHasToken: !!githubTokenEnc, mailHasPassword: !!mailPasswordEnc, hfHasToken: !!hfTokenEnc };
 }
 /** Lässt aus der Oberfläche nur bekannte, unkritische Einstellungen durch. */
 function filterRendererSettings(patch) {
@@ -241,6 +263,18 @@ function registerIpc() {
     const t = getGithubToken();
     if (!t) return { ok: false, error: 'Kein Token gespeichert' };
     try { return { ok: true, login: await github.whoami(t) }; } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  });
+  ipcMain.handle('hf:setToken', async (_e, token) => {
+    const t = String(token || '').trim();
+    if (!t) { setHfToken(''); return { ok: true, name: '' }; }
+    if (!/^hf_[A-Za-z0-9]{20,}$/.test(t)) return { ok: false, error: 'Das sieht nicht wie ein Hugging-Face-Token aus (beginnt mit „hf_“).' };
+    try {
+      const name = await hf.whoami(t);
+      setHfToken(t);
+      return { ok: true, name };
+    } catch (e) {
+      return { ok: false, error: String(e.message || e) };
+    }
   });
   ipcMain.handle('mail:setPassword', (_e, pw) => { setMailPassword(String(pw || '').replace(/\s+/g, '')); return publicSettings(store.getSettings()); });
   ipcMain.handle('mail:test', async (_e, cfgIn) => {
@@ -374,20 +408,21 @@ function registerIpc() {
     await engine.chatStream(body, (o) => { if (o.message && o.message.content) out += o.message.content; });
     return out.trim();
   });
+  // Bis zu 3 Downloads gleichzeitig, weitere warten in der Reihe. Jeder lässt sich einzeln abbrechen.
+  dlQueue = new DownloadQueue({
+    max: 3,
+    run: (name, signal) => downloadModel({
+      name, root: models.dir(), signal, token: getHfToken(),
+      onProgress: (p) => send('models:downloadProgress', p),
+    }),
+    onState: (st) => send('models:downloadState', st),
+  });
   ipcMain.handle('models:download', async (_e, name) => {
     if (!hf.parsePull(name)) throw new Error('Ungültiger Modellname.');
-    if (pullController) throw new Error('Es läuft schon ein Download.');
-    pullController = new AbortController();
-    try {
-      return await downloadModel({
-        name, root: models.dir(), signal: pullController.signal,
-        onProgress: (p) => send('models:downloadProgress', p),
-      });
-    } finally {
-      pullController = null;
-    }
+    return dlQueue.add(String(name));
   });
-  ipcMain.handle('models:cancelDownload', () => { if (pullController) pullController.abort(); return true; });
+  ipcMain.handle('models:cancelDownload', (_e, name) => { if (name) dlQueue.cancel(String(name)); else dlQueue.cancelAll(); return true; });
+  ipcMain.handle('models:downloads', () => dlQueue.list());
   ipcMain.handle('models:unload', async () => { await engine.stop(); return true; });
 
   ipcMain.handle('chat:start', async (_e, { id, chatId, body, useTools }) => {
@@ -430,13 +465,73 @@ function registerIpc() {
   });
 
   // ---------- Sprache ----------
-  ipcMain.handle('speech:status', () => ({ ...speech.status(), supertonic: supertonic.status() }));
+  ipcMain.handle('speech:status', () => ({ ...speech.status(), supertonic: supertonic.status(), phonon: phonon.status(), voxtral: voxtral.status() }));
   ipcMain.handle('speech:prepareStt', (_e, model) => speech.prepareStt(model));
   ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
-  ipcMain.handle('speech:transcribe', (_e, { wav, lang, model }) => speech.transcribe(wav, lang, model));
-  ipcMain.handle('speech:warmStt', (_e, model) => speech.warmStt(model || store.getSettings().sttModel));
-  ipcMain.handle('speech:synthesize', (_e, { text, voice, speed }) => {
+  ipcMain.handle('speech:transcribe', async (_e, { wav, lang, model }) => {
+    if (store.getSettings().sttEngine === 'voxtral') {
+      if (!voxtral.ready()) throw new Error('Voxtral ist noch nicht geladen (Einstellungen → Sprache).');
+      return voxtral.transcribe(wav);
+    }
+    return speech.transcribe(wav, lang, model);
+  });
+  ipcMain.handle('speech:warmStt', () => warmStt());
+  ipcMain.handle('voxtral:setup', async () => {
+    try {
+      await voxtral.install();
+      send('speech:progress', { task: 'voxtral', label: 'Voxtral startet (Modell in den Speicher laden) …', pct: null });
+      const t0 = Date.now();
+      await voxtral.ensure();
+      const seconds = (Date.now() - t0) / 1000;
+      speech.stopWhisperServer(); // Whisper muss nicht nebenbei Speicher belegen
+      const settings = publicSettings(store.setSettings({ sttEngine: 'voxtral' }));
+      return { ok: true, seconds, settings };
+    } catch (e) {
+      return { ok: false, error: /abort/i.test(String(e && e.name)) ? 'Abgebrochen.' : String((e && e.message) || e) };
+    }
+  });
+  ipcMain.handle('voxtral:cancel', () => { voxtral.cancelInstall(); return true; });
+  ipcMain.handle('voxtral:remove', () => {
+    voxtral.remove();
+    return publicSettings(store.getSettings().sttEngine === 'voxtral' ? store.setSettings({ sttEngine: 'whisper' }) : store.getSettings());
+  });
+  ipcMain.handle('phonon:setup', async () => {
+    try {
+      await phonon.install(getHfToken());
+      const s = store.getSettings();
+      const t0 = Date.now();
+      await phonon.synthesize('Hallo, das ist ein kurzer Test.', { lang: 'de', voice: s.ttsPhononVoice || 'anton' });
+      const seconds = (Date.now() - t0) / 1000;
+      const settings = publicSettings(store.setSettings({ ttsEngine: 'phonon', ttsPhononVoice: s.ttsPhononVoice || 'anton' }));
+      return { ok: true, seconds, settings };
+    } catch (e) {
+      return { ok: false, gated: !!(e && e.gated), error: /abort/i.test(String(e && e.name)) ? 'Abgebrochen.' : String((e && e.message) || e) };
+    }
+  });
+  ipcMain.handle('phonon:cancel', () => { phonon.cancelInstall(); return true; });
+  ipcMain.handle('phonon:remove', () => {
+    phonon.remove();
+    return publicSettings(store.getSettings().ttsEngine === 'phonon' ? store.setSettings({ ttsEngine: 'supertonic' }) : store.getSettings());
+  });
+  // Vorschau einer Phonon-Stimme (unabhängig von der gespeicherten Auswahl)
+  ipcMain.handle('phonon:preview', (_e, { voice, lang }) => {
+    const l = lang && lang !== 'auto' ? lang : 'de';
+    const text = { de: 'Hallo! So klinge ich, wenn ich Dir Antworten vorlese. Heute ist der 20. November.', en: 'Hello! This is how I sound when I read your answers aloud.', fr: 'Bonjour ! Voici ma voix quand je lis tes réponses.', es: '¡Hola! Así sueno cuando leo tus respuestas.', pt: 'Olá! É assim que eu soo quando leio as tuas respostas.' }[l] || '';
+    phonon.cancel();
+    return phonon.synthesize(text, { lang: l, voice });
+  });
+  ipcMain.handle('speech:synthesize', async (_e, { text, voice, speed }) => {
     const s = store.getSettings();
+    // Phonon spricht Deutsch, Englisch, Französisch, Spanisch, Portugiesisch – Türkisch übernimmt Supertonic.
+    if (s.ttsEngine === 'phonon' && voice !== 'tr' && phonon.modelReady()) {
+      const lang = s.ttsPhononLang && s.ttsPhononLang !== 'auto' ? s.ttsPhononLang : 'de';
+      try {
+        return await phonon.synthesize(text, { lang, voice: s.ttsPhononVoice || 'anton' });
+      } catch (e) {
+        // Nach „Stopp“ nicht einspringen; sonst übernimmt Supertonic, falls eingerichtet.
+        if (/499/.test(String(e && e.message)) || !supertonic.status().ready) throw e;
+      }
+    }
     if (s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
     return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
   });
@@ -457,6 +552,7 @@ function registerIpc() {
   ipcMain.handle('speech:cancelSynth', async () => {
     // Stopp gilt für alle Stimmen-Motoren: Supertonic (läuft in der App) und den OuteTTS-Server.
     supertonic.cancel();
+    phonon.cancel();
     const s = store.getSettings();
     if (s.ttsEngine === 'server') await speech.cancelServer(s.ttsServerUrl);
     return true;
@@ -536,6 +632,14 @@ function registerIpc() {
   });
 }
 
+/** Spracherkennung vorwärmen: je nach Einstellung Voxtral oder Whisper (das andere wird nicht geladen). */
+function warmStt() {
+  const s = store.getSettings();
+  if (s.sttEngine === 'voxtral' && voxtral.ready()) { speech.stopWhisperServer(); return voxtral.warm(); }
+  voxtral.stop();
+  return speech.warmStt(s.sttModel);
+}
+
 async function ensureTessData() {
   const dir = path.join(app.getPath('userData'), 'tessdata');
   fs.mkdirSync(dir, { recursive: true });
@@ -578,5 +682,7 @@ app.on('before-quit', () => {
   procs.killAll();
   if (engine) engine.stop();
   if (speech) speech.stopWhisperServer();
+  if (voxtral) voxtral.stop();
+  if (phonon) phonon.cancel();
   if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
 });

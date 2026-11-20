@@ -2,6 +2,7 @@
 // Beide Seiten liegen in den Einstellungen unter „Lokale Modelle“ (wie bei Bionic).
 import { el, icon } from './ui.js';
 import { formatBytes } from '../lib/util.js';
+import { repoFromInput } from '../lib/hf.js';
 
 const fmtNum = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Mio.' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', ',') + ' Tsd.' : String(n || 0));
 const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -43,7 +44,7 @@ export function mountExplore(root, ctx) {
   const HKEY = 'fa-explore-history';
   const loadHist = () => { try { const v = JSON.parse(localStorage.getItem(HKEY) || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 15) : []; } catch { return []; } };
   const saveHist = (arr) => { try { localStorage.setItem(HKEY, JSON.stringify(arr.slice(0, 15))); } catch { /* egal */ } };
-  const { box: sbox, inp: q } = searchBox('Modelle auf Hugging Face suchen, z. B. qwen, gpt-oss, gemma', (now) => { if (now) { hideHist(); doSearch(); } else showHist(); });
+  const { box: sbox, inp: q } = searchBox('Suchen (z. B. qwen, gemma) oder Link/„autor/name“ einfügen', (now) => { if (now) { hideHist(); doSearch(); } else showHist(); });
   const sWrap = el('div', 'search-wrap');
   const histBox = el('div', 'history hidden');
   sWrap.append(sbox, histBox);
@@ -113,7 +114,7 @@ export function mountExplore(root, ctx) {
     const inp = el('input'); inp.type = 'text'; inp.placeholder = 'unsloth/gpt-oss-20b-GGUF:Q4_K_M';
     const b = el('button', 'btn', 'Laden');
     const st = el('div', 'note');
-    b.onclick = () => { if (inp.value.trim()) { download(inp.value.trim()); st.textContent = 'Download läuft – Stand siehst Du links unten und in der Bibliothek.'; } };
+    b.onclick = () => { if (inp.value.trim()) { download(inp.value.trim()); st.textContent = 'Download eingereiht – Stand siehst Du links unten und in der Bibliothek.'; } };
     inl.append(inp, b);
     direct.append(inl, st);
     e.appendChild(direct);
@@ -124,7 +125,17 @@ export function mountExplore(root, ctx) {
     if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
     ctx.startPull(name);
   }
-  const offDl = ctx.dlOn(() => { const sb = right.querySelector('.dl-stop'); if (sb) sb.style.display = ctx.dl.state === 'running' ? '' : 'none'; const st = right.querySelector('.dl-status'); if (st) st.textContent = ctx.dl.state === 'idle' ? '' : ctx.dl.name.replace(/^hf\.co\//, '') + ': ' + ctx.dlText(); });
+  // Download-Stand in der Detailansicht: eine Zeile je laufendem/wartendem Download dieses Repos
+  const drawDetailDl = () => {
+    const box = right.querySelector('.dl-status');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const d of ctx.dls.values()) {
+      if (!selected || !d.name.toLowerCase().startsWith(selected.toLowerCase() + ':')) continue;
+      box.appendChild(ctx.dlRow(d));
+    }
+  };
+  const offDl = ctx.dlOn(drawDetailDl);
 
   async function openDetail(id, keepScroll) {
     selected = id;
@@ -133,7 +144,12 @@ export function mountExplore(root, ctx) {
     right.innerHTML = '';
     right.appendChild(el('div', 'note', 'Lade Details …'));
     let d;
-    try { d = await api.hf.details(id); } catch (e) { right.innerHTML = ''; right.appendChild(el('div', 'err', 'Details nicht ladbar: ' + cleanErr(e))); return; }
+    try { d = await api.hf.details(id); } catch (e) {
+      right.innerHTML = '';
+      const msg = cleanErr(e);
+      right.appendChild(el('div', 'err', /\(404\)|\(401\)/.test(msg) ? `Das Modell „${id}“ gibt es auf Hugging Face nicht (oder es ist privat).` : 'Details nicht ladbar: ' + msg));
+      return;
+    }
     if (selected !== id) return;
     right.innerHTML = '';
     const [author, name] = d.id.split('/');
@@ -154,7 +170,7 @@ export function mountExplore(root, ctx) {
     } else {
       const have = installedNames();
       const tbl = el('div', 'quant-table');
-      const status = el('div', 'note dl-status');
+      const status = el('div', 'dl-status');
       for (const qn of d.quants) {
         const row = el('div', 'quant-row' + (qn.empfohlen ? ' rec' : ''));
         const nm = el('div', 'q-name'); nm.textContent = qn.name;
@@ -165,17 +181,16 @@ export function mountExplore(root, ctx) {
         if (have.has(qn.pull.toLowerCase())) act.appendChild(el('span', 'badge ok', 'Installiert'));
         else {
           const b = el('button', 'btn small' + (qn.empfohlen ? ' primary' : ''), 'Laden');
-          b.onclick = () => { download(qn.pull); status.textContent = 'Download gestartet – Stand auch in der Bibliothek.'; };
+          b.onclick = () => download(qn.pull);
           act.appendChild(b);
         }
         row.append(nm, sz, fit, act);
         tbl.appendChild(row);
       }
       right.appendChild(tbl);
-      const stop = el('button', 'btn small dl-stop', 'Download abbrechen');
-      stop.style.display = ctx.dl.state === 'running' ? '' : 'none';
-      stop.onclick = () => ctx.dlCancel();
-      right.append(status, stop);
+      right.appendChild(status);
+      right.appendChild(el('div', 'note', 'Bis zu 3 Downloads laufen gleichzeitig, weitere warten in der Reihe. Alle Downloads siehst Du auch links unten und in der Bibliothek.'));
+      drawDetailDl();
     }
 
     right.appendChild(el('h3', null, 'Details'));
@@ -228,13 +243,26 @@ export function mountExplore(root, ctx) {
     left.innerHTML = '';
     const term = q.value.trim();
     if (term) saveHist([term, ...loadHist().filter((h) => h.toLowerCase() !== term.toLowerCase())]);
+    // Link oder „autor/name“: direkt dieses Modell öffnen (die Suche zeigt höchstens 60 Treffer, da fehlen manche Repos)
+    const direct = repoFromInput(term);
+    if (direct) {
+      count.textContent = 'Direkt geöffnet';
+      left.appendChild(card({ id: direct, likes: 0, downloads: 0, updated: '', features: [] }, true));
+      await openDetail(direct);
+      return;
+    }
     count.textContent = 'Suche …';
     let list = [];
     try { list = await api.hf.search({ query: q.value.trim(), sort: sort.value }); }
     catch (e) { count.textContent = ''; left.appendChild(el('div', 'err', 'Suche nicht möglich: ' + cleanErr(e))); return; }
     count.textContent = `${list.length} Ergebnisse auf Hugging Face`;
     if (!list.length) { left.appendChild(el('div', 'note', 'Nichts gefunden.')); return; }
-    for (const m of list) {
+    for (const m of list) left.appendChild(card(m));
+  }
+
+  /** Karte in der Trefferliste. bare = nur Name (direkt geöffnetes Repo, Zahlen stehen rechts). */
+  function card(m, bare) {
+    {
       const [author, name] = m.id.split('/');
       const c = el('button', 'model-card' + (m.id === selected ? ' active' : ''));
       c.dataset.id = m.id;
@@ -252,9 +280,10 @@ export function mountExplore(root, ctx) {
       const st = el('div', 'mc-stats');
       st.append(el('span', null, '☆ ' + m.likes.toLocaleString('de-DE')), el('span', null, '⤓ ' + fmtNum(m.downloads)));
       r.append(st, el('div', 'mc-ago', ago(m.updated)));
-      c.append(av, l, r);
+      c.append(av, l);
+      if (!bare) c.appendChild(r);
       c.onclick = () => openDetail(m.id);
-      left.appendChild(c);
+      return c;
     }
   }
 
@@ -326,33 +355,22 @@ export function mountLibrary(root, ctx) {
   page.appendChild(box);
   root.appendChild(page);
 
-  let lastState = ctx.dl.state;
+  const doneSeen = new Set();
   function drawDl() {
     dlBox.innerHTML = '';
-    const d = ctx.dl;
-    const show = d.state === 'running' || d.state === 'cancelled' || d.state === 'error';
-    dlBox.classList.toggle('hidden', !show);
-    if (!show) return;
+    dlBox.classList.toggle('hidden', !ctx.dls.size);
+    if (!ctx.dls.size) return;
     const head = el('div', 'dl-head');
-    const nm = el('div', 'lc-name', d.name.replace(/^hf\.co\//, '')); nm.title = d.name;
-    head.appendChild(nm);
-    head.appendChild(el('span', 'badge ' + (d.state === 'running' ? 'warn' : d.state === 'error' ? 'bad' : ''), d.state === 'running' ? 'Lädt …' : d.state === 'error' ? 'Fehler' : 'Abgebrochen'));
+    head.appendChild(el('div', 'lc-name', 'Downloads'));
+    head.appendChild(el('span', 'note', 'bis zu 3 gleichzeitig, weitere warten'));
     dlBox.appendChild(head);
-    if (d.state === 'running') { const bar = el('div', 'dl-bar'); const i = document.createElement('i'); i.style.width = (d.total ? ctx.dlPercent() : 5) + '%'; bar.appendChild(i); dlBox.appendChild(bar); }
-    dlBox.appendChild(el('div', 'note', ctx.dlText()));
-    const row = el('div', 'dlw-row');
-    if (d.state === 'running') { const b = el('button', 'btn small danger', 'Abbrechen'); b.onclick = () => ctx.dlCancel(); row.appendChild(b); }
-    else {
-      const r = el('button', 'btn small primary', 'Erneut laden'); r.onclick = () => ctx.startPull(d.name);
-      const x = el('button', 'btn small', 'Verwerfen'); x.onclick = () => ctx.dlDismiss();
-      row.append(r, x);
-    }
-    dlBox.appendChild(row);
+    for (const d of ctx.dls.values()) dlBox.appendChild(ctx.dlRow(d));
   }
   const offDl = ctx.dlOn(() => {
     drawDl();
-    if (lastState !== ctx.dl.state && ctx.dl.state === 'done') load();
-    lastState = ctx.dl.state;
+    let fresh = false;
+    for (const d of ctx.dls.values()) if (d.state === 'done' && !doneSeen.has(d.name)) { doneSeen.add(d.name); fresh = true; }
+    if (fresh) load();
   });
   drawDl();
 

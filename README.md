@@ -11,6 +11,12 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.0
+- **Mehrere Downloads:** Bis zu 3 Modelle laden gleichzeitig, weitere warten in einer Reihe. Jeder Download hat eigenen Fortschritt und eigenes „Abbrechen“ (Liste links unten, in der Bibliothek und in Erkunden).
+- **Hugging-Face-Link im Suchfeld:** Ein Link `https://huggingface.co/autor/name` oder einfach `autor/name` in „Erkunden“ öffnet direkt dieses Modell, auch wenn es in den Suchtreffern fehlt.
+- **Phonon (Vorlesen):** Neue mehrsprachige Stimmen von Gradium (`gradium/phonon-40m-multilingual`, 75 MB, Lizenz CC BY-NC 4.0): Anton, Nele und weitere deutsche Stimmen, dazu Zoey und Easton (Englisch). Einstellungen → Sprache: Herunterladen, **Textsprache** (für Zahlen/Datum), **Stimme** mit **Vorschau**, **Wiedergabegeschwindigkeit**. Das Modell ist geschützt: einmal auf Hugging Face die Bedingungen akzeptieren und den **Hugging-Face-Token** eintragen (verschlüsselt gespeichert, nur für Downloads). Danach offline. Türkisch liest weiter Supertonic.
+- **Voxtral (Diktieren):** `mistralai/Voxtral-Mini-4B-Realtime-2602` als Alternative zu Whisper (Einstellungen → Sprache → „Erkennung mit“). Läuft in der eingebauten Engine (Vulkan unter Windows, Metal auf dem Mac), Download ca. 3,6 GB, erkennt die Sprache selbst.
+
 ## Neu in 2.4.0
 
 - Mac: Die GPU-Anzeige in der Seitenleiste zeigt jetzt die Auslastung der Apple-GPU.

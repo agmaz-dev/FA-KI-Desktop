@@ -665,8 +665,8 @@ async function speakNow(text, settingsOverride) {
       voicePref: s.ttsVoice,
       speechStatus: state.speechStatus,
       speed: s.ttsSpeed || 1,
-      engine: s.ttsEngine === 'server' ? 'server' : 'supertonic',
-      onWarn: (m) => hint((s.ttsEngine === 'supertonic' ? 'Supertonic ist gerade nicht bereit' : 'Meine Stimme (OuteTTS) ist gerade nicht bereit') + ', es spricht die Windows-Stimme: ' + m, 0),
+      engine: s.ttsEngine === 'server' || s.ttsEngine === 'phonon' ? s.ttsEngine : 'supertonic',
+      onWarn: (m) => hint(({ supertonic: 'Supertonic', phonon: 'Phonon', server: 'Meine Stimme (OuteTTS)' }[s.ttsEngine] || 'Die Stimme') + ' ist gerade nicht bereit, es spricht die System-Stimme: ' + m, 0),
       onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
@@ -687,6 +687,15 @@ function renderTtsButton() {
 // ---------- Mikrofon ----------
 async function ensureStt() {
   const st = await api.speech.status();
+  if (state.settings.sttEngine === 'voxtral') {
+    if (st.voxtral && st.voxtral.ready) return true;
+    if (!confirm(`Zum Diktieren ist Voxtral gewählt. Dafür wird einmalig das Modell geladen (ca. ${(st.voxtral && st.voxtral.approx) || '3,6 GB'}). Jetzt laden?`)) return false;
+    showProgress('Voxtral wird geladen', null);
+    const r = await api.voxtral.setup();
+    hideProgress();
+    if (!r.ok) { hint('Voxtral konnte nicht eingerichtet werden: ' + r.error, 0); return false; }
+    return true;
+  }
   const model = state.settings.sttModel;
   if (st.whisperBinary && st.whisperModels[model]) return true;
   if (!confirm(`Für die Spracheingabe muss einmalig ein lokales Spracherkennungs-Modell geladen werden (ca. ${st.info.whisperModels[model].approx}). Jetzt laden?`)) return false;
@@ -818,63 +827,100 @@ async function pickFiles() {
 }
 
 // ---------- Seiten: Chat und Einstellungen (Erkunden und Bibliothek liegen darin) ----------
-// Download-Verwaltung: gilt für die ganze App, nicht nur für eine Seite
-const dl = { state: 'idle', name: '', status: '', completed: 0, total: 0, error: '' };
+// Download-Verwaltung: gilt für die ganze App. Bis zu 3 laufen gleichzeitig, weitere warten (Hauptprozess).
+// dls: Name -> { name, state: queued|running|done|cancelled|error, status, completed, total, error }
+const dls = new Map();
 const dlListeners = new Set();
-function dlEmit() { for (const f of [...dlListeners]) f(dl); }
+function dlEmit() { for (const f of [...dlListeners]) f(dls); }
 function dlOn(f) { dlListeners.add(f); return () => dlListeners.delete(f); }
-function dlPercent() { return dl.total ? Math.min(100, Math.round((dl.completed / dl.total) * 100)) : 0; }
-function dlText() {
-  if (dl.state === 'running') return dl.total ? `${dlPercent()} % · ${formatBytes(dl.completed)} / ${formatBytes(dl.total)}` : (dl.status || 'Starte …');
-  if (dl.state === 'done') return 'Fertig – in der Bibliothek';
-  if (dl.state === 'cancelled') return 'Abgebrochen – „Erneut laden“ setzt fort';
-  if (dl.state === 'error') return 'Fehler: ' + dl.error;
+function dlPercent(d) { return d && d.total ? Math.min(100, Math.round((d.completed / d.total) * 100)) : 0; }
+function dlText(d) {
+  if (!d) return '';
+  if (d.state === 'queued') return 'Wartet – startet, sobald einer der 3 laufenden Downloads fertig ist';
+  if (d.state === 'running') return d.total ? `${dlPercent(d)} % · ${formatBytes(d.completed)} / ${formatBytes(d.total)}` : (d.status || 'Starte …');
+  if (d.state === 'done') return 'Fertig – in der Bibliothek';
+  if (d.state === 'cancelled') return 'Abgebrochen – „Erneut laden“ setzt fort';
+  if (d.state === 'error') return 'Fehler: ' + d.error;
   return '';
 }
+const dlActive = () => [...dls.values()].filter((d) => d.state === 'queued' || d.state === 'running');
 async function startPull(name) {
-  if (dl.state === 'running') return hint('Es läuft schon ein Download.');
-  Object.assign(dl, { state: 'running', name, status: 'Starte Download …', completed: 0, total: 0, error: '' });
+  const cur = dls.get(name);
+  if (cur && (cur.state === 'queued' || cur.state === 'running')) return hint('Dieses Modell wird schon geladen.');
+  dls.set(name, { name, state: 'queued', status: '', completed: 0, total: 0, error: '' });
   dlEmit();
   try {
     const r = await api.models.download(name);
-    dl.state = r && r.aborted ? 'cancelled' : 'done';
-    if (dl.state === 'done') { dl.completed = dl.total; await loadModels(); }
+    const d = dls.get(name);
+    if (d) {
+      d.state = r && r.aborted ? 'cancelled' : 'done';
+      if (d.state === 'done') d.completed = d.total;
+    }
+    if (!(r && r.aborted)) await loadModels();
   } catch (e) {
-    dl.state = 'error';
-    dl.error = String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    const d = dls.get(name);
+    if (d) { d.state = 'error'; d.error = String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
   }
   dlEmit();
 }
-function dlCancel() { api.models.cancel(); }
-function dlDismiss() { dl.state = 'idle'; dlEmit(); }
-api.models.onProgress((p) => { if (dl.state !== 'running') return; dl.status = p.status; if (p.total) { dl.total = p.total; dl.completed = p.completed; } dlEmit(); });
+function dlCancel(name) { api.models.cancel(name); }
+function dlDismiss(name) { if (name) dls.delete(name); else for (const [k, d] of dls) if (d.state !== 'queued' && d.state !== 'running') dls.delete(k); dlEmit(); }
+api.models.onState((st) => {
+  const d = dls.get(st.name);
+  if (!d) return;
+  if (st.state === 'queued' || st.state === 'running') { d.state = st.state; dlEmit(); }
+});
+api.models.onProgress((p) => {
+  const d = dls.get(p.name);
+  if (!d || (d.state !== 'running' && d.state !== 'queued')) return;
+  d.state = 'running';
+  d.status = p.status;
+  if (p.total) { d.total = p.total; d.completed = p.completed; }
+  dlEmit();
+});
 
-/** Kleine Download-Anzeige (Seitenleiste und Einstellungs-Navigation) */
+/** Eine Zeile je Download: Name, Balken, Stand, Abbrechen bzw. Erneut laden/Schließen. */
+function dlRow(d, { compact = false } = {}) {
+  const box = el('div', 'dl-item');
+  const head = el('div', 'dl-head');
+  const nm = el('div', compact ? 'dlw-name' : 'lc-name', d.name.replace(/^hf\.co\//, ''));
+  nm.title = d.name;
+  head.appendChild(nm);
+  if (!compact) head.appendChild(el('span', 'badge ' + (d.state === 'running' ? 'warn' : d.state === 'error' ? 'bad' : d.state === 'done' ? 'ok' : ''), { queued: 'Wartet', running: 'Lädt …', done: 'Fertig', cancelled: 'Abgebrochen', error: 'Fehler' }[d.state] || ''));
+  box.appendChild(head);
+  if (d.state === 'running' || d.state === 'queued') {
+    const bar = el('div', 'dl-bar'); const i = document.createElement('i');
+    i.style.width = (d.state === 'running' ? (d.total ? dlPercent(d) : 5) : 0) + '%';
+    bar.appendChild(i);
+    box.appendChild(bar);
+  }
+  box.appendChild(el('div', 'note', dlText(d)));
+  const row = el('div', 'dlw-row');
+  if (d.state === 'running' || d.state === 'queued') {
+    const b = el('button', 'btn small' + (compact ? '' : ' danger'), 'Abbrechen'); b.onclick = () => dlCancel(d.name); row.appendChild(b);
+  } else {
+    const o = el('button', 'btn small primary', d.state === 'done' ? 'Zur Bibliothek' : 'Erneut laden');
+    o.onclick = () => (d.state === 'done' ? (dlDismiss(d.name), showView('settings', 'library')) : startPull(d.name));
+    const x = el('button', 'btn small', 'Schließen'); x.onclick = () => dlDismiss(d.name);
+    row.append(o, x);
+  }
+  box.appendChild(row);
+  return box;
+}
+
+/** Kleine Download-Anzeige (Seitenleiste und Einstellungs-Navigation): alle laufenden und wartenden Downloads */
 function dlWidget() {
   const box = el('div', 'dl-widget hidden');
   const render = () => {
     if (!box.isConnected && box.dataset.live) { off(); return; }
     box.dataset.live = '1';
     box.innerHTML = '';
-    box.classList.toggle('hidden', dl.state === 'idle');
-    if (dl.state === 'idle') return;
-    const nm = el('div', 'dlw-name', dl.name.replace(/^hf\.co\//, ''));
-    nm.title = dl.name;
-    box.appendChild(nm);
-    if (dl.state === 'running') {
-      const bar = el('div', 'dl-bar'); const i = document.createElement('i'); i.style.width = (dl.total ? dlPercent() : 5) + '%'; bar.appendChild(i);
-      box.appendChild(bar);
-    }
-    box.appendChild(el('div', 'note', dlText()));
-    const row = el('div', 'dlw-row');
-    if (dl.state === 'running') { const b = el('button', 'btn small', 'Abbrechen'); b.onclick = dlCancel; row.appendChild(b); }
-    else {
-      const o = el('button', 'btn small primary', dl.state === 'done' ? 'Zur Bibliothek' : 'Erneut laden');
-      o.onclick = () => (dl.state === 'done' ? (dlDismiss(), showView('settings', 'library')) : startPull(dl.name));
-      const x = el('button', 'btn small', 'Schließen'); x.onclick = dlDismiss;
-      row.append(o, x);
-    }
-    box.appendChild(row);
+    box.classList.toggle('hidden', !dls.size);
+    if (!dls.size) return;
+    const act = dlActive();
+    const run = act.filter((d) => d.state === 'running').length;
+    if (dls.size > 1) box.appendChild(el('div', 'dlw-sum', act.length ? `Downloads: ${run} laufen${act.length > run ? `, ${act.length - run} warten` : ''}` : 'Downloads'));
+    for (const d of dls.values()) box.appendChild(dlRow(d, { compact: true }));
   };
   const off = dlOn(render);
   render();
@@ -900,7 +946,7 @@ function showView(name, tab) {
 function modelsCtx() {
   return {
     api, hint, renderMd,
-    dl, dlOn, dlText, dlPercent, startPull, dlCancel, dlDismiss,
+    dls, dlOn, dlText, dlPercent, dlRow, startPull, dlCancel, dlDismiss,
     models: () => state.models, refreshModels: loadModels,
     useModel: async (n) => { $('modelSel').value = n; renderModelMenu(); await onModelChanged(true); showView('chat'); hint('Modell gewählt: ' + n); },
     goTab: (id) => showView('settings', id),

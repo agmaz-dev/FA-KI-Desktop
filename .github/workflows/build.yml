@@ -20,6 +20,7 @@ jobs:
     env:
       WHISPER_CPP_REF: v1.9.5 # fest angepinnt, damit der Build reproduzierbar bleibt
       LLAMA_CPP_TAG: b12530 # fertige Windows-Version (Vulkan, läuft auf AMD/NVIDIA/Intel), fest angepinnt
+      PTTS_TAG: v0.7.1 # Phonon-Laufzeit (gradium-ai/xn-ptts), fest angepinnt
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,16 @@ jobs:
           find build-bundled/llama -name llama-server.exe
           test -f build-bundled/llama/llama-server.exe
           echo "$LLAMA_CPP_TAG" > build-bundled/llama/VERSION
+      - name: Sprachausgabe Phonon (ptts) laden
+        shell: bash
+        run: |
+          mkdir -p ptts-dl ptts-x build-bundled/ptts
+          gh release download "$PTTS_TAG" --repo gradium-ai/xn-ptts --pattern "ptts-*-x86_64-pc-windows-msvc.zip" --pattern SHA256SUMS --dir ptts-dl
+          (cd ptts-dl && grep "x86_64-pc-windows-msvc.zip" SHA256SUMS | sha256sum -c -)
+          7z x -y ptts-dl/*.zip -optts-x > /dev/null
+          find ptts-x -name ptts.exe -exec cp {} build-bundled/ptts/ \;
+          test -f build-bundled/ptts/ptts.exe
+          echo "$PTTS_TAG" > build-bundled/ptts/VERSION
       - run: npm ci
       - run: npm test
       - run: npm run dist
@@ -63,6 +74,9 @@ jobs:
       - name: Prüfen, ob llama-server im Installer liegt
         shell: bash
         run: test -f dist/win-unpacked/resources/llama/llama-server.exe
+      - name: Prüfen, ob Phonon (ptts) im Installer liegt
+        shell: bash
+        run: test -f dist/win-unpacked/resources/ptts/ptts.exe
       - name: Version ermitteln
         id: ver
         shell: bash
@@ -104,6 +118,7 @@ jobs:
     env:
       WHISPER_CPP_REF: v1.9.5
       LLAMA_CPP_TAG: b12530
+      PTTS_TAG: v0.7.1
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +126,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Sprachausgabe Phonon (ptts, Apple Silicon) laden
+        run: |
+          mkdir -p ptts-dl ptts-x mac-bundle/ptts
+          gh release download "$PTTS_TAG" --repo gradium-ai/xn-ptts --pattern "ptts-*-aarch64-apple-darwin.tar.gz" --pattern SHA256SUMS --dir ptts-dl
+          (cd ptts-dl && grep "aarch64-apple-darwin.tar.gz" SHA256SUMS | shasum -a 256 -c -)
+          tar -xzf ptts-dl/*.tar.gz -C ptts-x
+          cp "$(find ptts-x -type f -name ptts | head -1)" mac-bundle/ptts/ptts
+          chmod +x mac-bundle/ptts/ptts
+          echo "$PTTS_TAG" > mac-bundle/ptts/VERSION
       - name: Spracherkennung (whisper.cpp, Metal) bauen
         run: |
           git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
@@ -154,11 +178,13 @@ jobs:
           APP="$(ls -d dist/mac-arm64/*.app | head -1)"
           echo "App: $APP"
           mkdir -p "$APP/Contents/Resources"
-          rm -rf "$APP/Contents/Resources/llama" "$APP/Contents/Resources/whisper"
+          rm -rf "$APP/Contents/Resources/llama" "$APP/Contents/Resources/whisper" "$APP/Contents/Resources/ptts"
           cp -a mac-bundle/llama "$APP/Contents/Resources/llama"
           cp -a mac-bundle/whisper "$APP/Contents/Resources/whisper"
+          cp -a mac-bundle/ptts "$APP/Contents/Resources/ptts"
           test -x "$APP/Contents/Resources/llama/llama-server"
           test -x "$APP/Contents/Resources/whisper/whisper-server"
+          test -x "$APP/Contents/Resources/ptts/ptts"
           # Lose Programme und Bibliotheken zuerst, dann das ganze Programm (ad-hoc, "-").
           find "$APP/Contents/Resources" -type f \( -name "*.dylib" -o -name "*.node" -o -perm +111 \) -print0 | while IFS= read -r -d '' f; do
             if file "$f" | grep -q "Mach-O"; then codesign --force -s - "$f" || true; fi
@@ -189,3 +215,44 @@ jobs:
           F="dist/FA-KI-Desktop-$V-mac-arm64.dmg"
           gh release create "v$V" --target "${{ github.sha }}" --title "FA KI Desktop $V" --notes "Installationsprogramme für Windows und Mac." >/dev/null 2>&1 || true
           gh release upload "v$V" "$F" || echo "::warning::$F ist in Release v$V schon vorhanden."
+
+  # Prüft Phonon und Voxtral mit den echten Programmen auf Windows und Mac (blockiert die Installer nicht).
+  # Phonon spricht einen Satz (freies Modell phonon-31m-en, gleicher Aufbau), Voxtral schreibt ihn wieder als Text.
+  sprachtest:
+    name: Sprachtest Phonon + Voxtral (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    continue-on-error: true
+    env:
+      LLAMA_CPP_TAG: b12530
+      PTTS_TAG: v0.7.1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Programme laden (ptts, llama-server)
+        shell: bash
+        run: |
+          mkdir -p dl x
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            gh release download "$PTTS_TAG" --repo gradium-ai/xn-ptts --pattern "ptts-*-x86_64-pc-windows-msvc.zip" --dir dl
+            gh release download "$LLAMA_CPP_TAG" --repo ggml-org/llama.cpp --pattern "llama-*-bin-win-vulkan-x64.zip" --dir dl
+            for f in dl/*.zip; do 7z x -y "$f" -ox > /dev/null; done
+            echo "PTTS=$(find x -name ptts.exe | head -1)" >> "$GITHUB_ENV"
+            echo "LLAMA=$(find x -name llama-server.exe | head -1)" >> "$GITHUB_ENV"
+          else
+            gh release download "$PTTS_TAG" --repo gradium-ai/xn-ptts --pattern "ptts-*-aarch64-apple-darwin.tar.gz" --dir dl
+            gh release download "$LLAMA_CPP_TAG" --repo ggml-org/llama.cpp --pattern "llama-*-bin-macos-arm64.*" --dir dl
+            for f in dl/*; do case "$f" in *.zip) unzip -q -o "$f" -d x ;; *.tar.gz|*.tgz) tar -xzf "$f" -C x ;; esac; done
+            echo "PTTS=$(find x -type f -name ptts | head -1)" >> "$GITHUB_ENV"
+            echo "LLAMA=$(find x -type f -name llama-server | head -1)" >> "$GITHUB_ENV"
+          fi
+      - name: Phonon und Voxtral ausprobieren
+        shell: bash
+        run: node scripts/voice-probe.js "$PTTS" "$LLAMA" probe-work

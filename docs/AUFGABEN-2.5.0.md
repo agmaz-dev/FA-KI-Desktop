@@ -1,5 +1,7 @@
 # Aufgaben für Version 2.5.0 (Übergabe an Claude Code)
 
+> Umgesetzt in 2.5.0 (siehe README, „Neu in 2.5.0“).
+
 Stand: 20.11.2026, Branch `feature/agent-erkunden`, zuletzt gebaut: 2.4.0 (Windows + Mac M1).
 
 ## Arbeitsweise (vom Nutzer gewünscht)
