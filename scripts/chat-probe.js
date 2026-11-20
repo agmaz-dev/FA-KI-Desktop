@@ -3,7 +3,8 @@
 // Aufruf: node scripts/chat-probe.js <llama-server> <modell.gguf>
 const { Engine } = require('../lib/engine');
 
-const [exe, model] = process.argv.slice(2);
+const path = require('path');
+const [exe, model] = process.argv.slice(2).map((p) => path.resolve(p));
 const e = new Engine({ exePath: exe, getSettings: () => ({ keepAlive: '5m' }), resolveModel: () => ({ file: model }), onStatus: (t) => t && console.log('Status:', t) });
 
 (async () => {
