@@ -70,7 +70,26 @@ export function mountExplore(root, ctx) {
   wbar.append(bBack, bFwd, bReload, bHome, wUrl, bLoad, bExt);
   const wHint = el('div', 'hfweb-hint', 'Tipp: Auf einer Modellseite „In FA KI laden“ klicken, oder unter „Files“ direkt auf eine .gguf-Datei – sie landet im Modellordner.');
   const wArea = el('div', 'hfweb-area');
-  web.append(wbar, wHint, wArea);
+  // Downloads und Meldungen über der Webseite (die Seite selbst verdeckt alles darunter)
+  const wDl = el('div', 'hfweb-dl hidden');
+  web.append(wbar, wHint, wDl, wArea);
+  const HINT = wHint.textContent;
+  let hintT = null;
+  const webNotice = (text) => {
+    wHint.textContent = text; wHint.classList.add('note-on');
+    clearTimeout(hintT);
+    hintT = setTimeout(() => { wHint.textContent = HINT; wHint.classList.remove('note-on'); }, 7000);
+  };
+  const drawWebDl = () => {
+    wDl.innerHTML = '';
+    const list = [...ctx.dls.values()].slice(-3);
+    for (const d of list) wDl.appendChild(ctx.dlRow(d, { compact: true }));
+    wDl.classList.toggle('hidden', !list.length);
+    requestAnimationFrame(sendBounds);
+  };
+  const offWebDl = ctx.dlOn(drawWebDl);
+  const offWebDown = api.hfweb.onDownload(({ name }) => webNotice('Download gestartet: ' + name + ' – der Fortschritt steht hier darunter.'));
+  const offWebNote = api.hfweb.onNotice(({ text }) => webNotice(text));
   let webRepo = '';
   let mode = 'search';
   const sendBounds = () => {
@@ -361,7 +380,8 @@ export function mountExplore(root, ctx) {
   sort.onchange = doSearch;
   showEmpty();
   doSearch();
-  return () => { offDl(); offWeb(); ro.disconnect(); window.removeEventListener('resize', sendBounds); api.hfweb.bounds({ visible: false }); };
+  drawWebDl();
+  return () => { offDl(); offWeb(); offWebDl(); offWebDown(); offWebNote(); clearTimeout(hintT); ro.disconnect(); window.removeEventListener('resize', sendBounds); api.hfweb.bounds({ visible: false }); };
 }
 
 export function mountLibrary(root, ctx) {
