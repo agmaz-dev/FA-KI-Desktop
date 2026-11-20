@@ -240,7 +240,20 @@ export function mountExplore(root, ctx) {
     if (!d.quants.length) {
       right.appendChild(el('div', 'err', d.ggufCount
         ? 'Die GGUF-Dateien in diesem Repo sind nur Hilfsdateien (z. B. LoRA-Adapter, Tokenizer, Bildteil) und kein eigenständiges Modell.'
-        : 'In diesem Repo liegen keine GGUF-Dateien. Die eingebaute Engine lädt nur GGUF – suche nach demselben Namen mit „GGUF“ (z. B. von unsloth, bartowski oder lmstudio-community).'));
+        : `In diesem Repo liegen keine GGUF-Dateien${d.format ? ` (Format: ${d.format})` : ''}. Die eingebaute Engine lädt nur GGUF.`));
+      if (!d.ggufCount && d.alternatives && d.alternatives.length) {
+        right.appendChild(el('div', 'note', 'Dasselbe Modell gibt es als GGUF – zum Öffnen klicken:'));
+        const alt = el('div', 'inline');
+        for (const a of d.alternatives) {
+          const b = el('button', 'btn small primary', a);
+          b.type = 'button';
+          b.onclick = () => { q.value = a; doSearch(); };
+          alt.appendChild(b);
+        }
+        right.appendChild(alt);
+      } else if (!d.ggufCount) {
+        right.appendChild(el('div', 'note', 'Tipp: nach demselben Namen mit „GGUF“ suchen (z. B. von unsloth, bartowski oder lmstudio-community).'));
+      }
     } else {
       const have = installedNames();
       const tbl = el('div', 'quant-table');
@@ -272,7 +285,7 @@ export function mountExplore(root, ctx) {
     const add = (k, v) => { if (!v) return; kv.appendChild(el('span', 'k', k)); const vv = el('span', 'v'); if (Array.isArray(v)) v.forEach((x) => vv.appendChild(el('span', 'badge feat', x))); else vv.appendChild(el('span', 'badge', v)); kv.appendChild(vv); };
     add('Parameter', d.parameter);
     add('Architektur', d.architektur);
-    add('Formate', 'GGUF');
+    add('Format', d.format);
     add('Kontext', d.kontext ? fmtNum(d.kontext) + ' Tokens' : '');
     add('Funktionen', d.features);
     right.appendChild(kv);

@@ -130,3 +130,11 @@ test('Download-Link von huggingface.co erkennen', () => {
   assert.strictEqual(hf.parseResolve('https://huggingface.co/models?search=x'), null);
   assert.strictEqual(hf.repoFromInput('https://huggingface.co/unsloth/Qwen3-GGUF/tree/main'), 'unsloth/Qwen3-GGUF');
 });
+
+test('baseName entfernt Format-Zusätze (für GGUF-Alternativen)', () => {
+  const { baseName } = require('../lib/hf');
+  assert.equal(baseName('prism-ml/Ternary-Bonsai-27B-mlx-2bit'), 'Ternary-Bonsai-27B');
+  assert.equal(baseName('mlx-community/Qwen3-8B-4bit'), 'Qwen3-8B');
+  assert.equal(baseName('org/Model-7B-AWQ'), 'Model-7B');
+  assert.equal(baseName('Qwen/Qwen3-8B'), 'Qwen3-8B');
+});

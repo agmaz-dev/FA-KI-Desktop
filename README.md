@@ -17,6 +17,7 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 - Keine hängenden Hintergrundprogramme mehr: Engine, Spracherkennung und Sprachausgabe werden bei jedem Programmende beendet. Reste nach einem Absturz räumt der nächste Start auf.
 - Weniger Abstürze beim Laden: bei bis zu 16 GB Speicher wird die Spracherkennung vor dem Laden eines Chat-Modells beendet und nicht mehr beim Start vorgewärmt. Reicht der Speicher nicht, lädt die App das Modell einmal mit kleinerem Kontext neu.
 - Verständliche Fehlermeldungen (zu wenig Speicher, nicht unterstütztes Modell, fehlende Datei).
+- Erkunden: Repos ohne GGUF (z. B. MLX) zeigen das echte Format und bieten passende GGUF-Fassungen als Knopf an. Entwurfsmodelle (dspark, eagle) werden nicht mehr als Stufe angeboten.
 - Erkunden → huggingface.co: Klick auf „Download“ bei einer .gguf-Datei wird jetzt sicher erkannt; Fortschrittsbalken und Meldung stehen direkt über der Webseite.
 - Neue Engine llama.cpp b12556 (Mac Metal, Windows Vulkan).
 
