@@ -110,6 +110,16 @@ function createWindow() {
     if (items.length && !win.isDestroyed()) Menu.buildFromTemplate(items).popup({ window: win });
   });
   win.loadFile(path.join(__dirname, 'build', 'renderer', 'index.html'));
+  win.webContents.on('did-finish-load', () => {
+    startLog('Fenster geladen');
+    // Für den Test in der CI: Fenster ist da -> melden und beenden
+    if (process.env.FA_SMOKE) setTimeout(() => {
+      win.webContents.executeJavaScript('document.querySelectorAll("#app").length + ":" + (document.getElementById("input") ? 1 : 0)')
+        .then((r) => { smoke('FA_SMOKE_OK ' + r + ' sichtbar=' + win.isVisible()); app.exit(0); })
+        .catch((e) => { smoke('FA_SMOKE_FAIL ' + e); app.exit(1); });
+    }, 4000);
+  });
+  win.webContents.on('render-process-gone', (_e, d) => startLog('Oberfläche abgestürzt: ' + JSON.stringify(d)));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -119,6 +129,23 @@ function createWindow() {
   });
 }
 
+// Startfehler sichtbar machen: Protokolldatei + Meldung statt still hängen zu bleiben
+function startLog(text) {
+  try { fs.appendFileSync(path.join(app.getPath('userData'), 'start-protokoll.log'), `[${new Date().toISOString()}] ${text}\n`); } catch { /* egal */ }
+  smoke('LOG ' + text);
+}
+/** Nur für den Test in der CI: FA_SMOKE = Pfad einer Ergebnisdatei. */
+function smoke(text) { if (process.env.FA_SMOKE) { try { fs.appendFileSync(process.env.FA_SMOKE, text + '\n'); } catch { /* egal */ } } }
+function startFailed(e) {
+  const msg = String((e && e.stack) || e);
+  startLog('FEHLER ' + msg);
+  if (process.env.FA_SMOKE) { smoke('FA_SMOKE_FAIL ' + msg); app.exit(1); return; }
+  try { dialog.showErrorBox('FA KI Desktop – Startfehler', 'Die App konnte nicht starten:\n\n' + String((e && e.message) || e) + '\n\nDetails: ' + path.join(app.getPath('userData'), 'start-protokoll.log')); } catch { /* egal */ }
+  app.exit(1);
+}
+process.on('uncaughtException', (e) => { startLog('uncaughtException ' + String((e && e.stack) || e)); if (!win) startFailed(e); });
+process.on('unhandledRejection', (e) => startLog('unhandledRejection ' + String((e && e.stack) || e)));
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -127,6 +154,7 @@ if (!gotLock) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
   app.whenReady().then(() => {
+    startLog(`Start ${app.getVersion()} auf ${process.platform} ${os.release()}`);
     const dataDir = app.getPath('userData');
     store = new Store(dataDir);
     models = new ModelStore(() => store.getSettings().modelDir || path.join(dataDir, 'models'));
@@ -186,7 +214,7 @@ if (!gotLock) {
         }
       }).catch(() => {});
     }
-  });
+  }).catch(startFailed);
   app.on('window-all-closed', () => app.quit());
 }
 

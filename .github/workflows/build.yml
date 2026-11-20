@@ -58,6 +58,14 @@ jobs:
       - name: Prüfen, ob Phonon (ptts) im Installer liegt
         shell: bash
         run: test -f dist/win-unpacked/resources/ptts/ptts.exe
+      - name: App-Start prüfen (Fenster geht auf)
+        shell: bash
+        run: |
+          EXE="$(ls dist/win-unpacked/*.exe | grep -v -i uninst | head -1)"
+          R="$RUNNER_TEMP/smoke.txt"; rm -f "$R"
+          FA_SMOKE="$R" timeout 120 "$EXE" || true
+          cat "$R" || true
+          grep -q FA_SMOKE_OK "$R"
       - name: Version ermitteln
         id: ver
         shell: bash
@@ -163,6 +171,14 @@ jobs:
           ln -s /Applications dmg-src/Applications
           hdiutil create -volname "FA KI Desktop" -srcfolder dmg-src -ov -format UDZO "dist/FA-KI-Desktop-$V-mac-arm64.dmg"
           ls -la dist/*.dmg
+      - name: App-Start prüfen (Fenster geht auf)
+        run: |
+          APP="$(ls -d dist/mac-arm64/*.app | head -1)"
+          EXE="$APP/Contents/MacOS/$(basename "$APP" .app)"
+          R="$RUNNER_TEMP/smoke.txt"; rm -f "$R"
+          FA_SMOKE="$R" perl -e 'alarm 120; exec @ARGV' "$EXE" || true
+          cat "$R" || true
+          grep -q FA_SMOKE_OK "$R"
       - name: Version ermitteln
         id: ver
         run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
