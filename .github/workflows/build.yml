@@ -176,7 +176,7 @@ jobs:
           APP="$PWD/$(ls -d dist/mac-arm64/*.app | head -1)"
           EXE="$APP/Contents/MacOS/$(basename "$APP" .app)"
           R="$RUNNER_TEMP/smoke.txt"; rm -f "$R"
-          FA_SMOKE="$R" ELECTRON_ENABLE_LOGGING=1 perl -e 'alarm 120; exec @ARGV' "$EXE" > "$RUNNER_TEMP/app-out.txt" 2>&1; echo "Exit-Code: $?"
+          FA_SMOKE="$R" ELECTRON_ENABLE_LOGGING=1 perl -e 'alarm 120; exec { $ARGV[0] } @ARGV' "$EXE" > "$RUNNER_TEMP/app-out.txt" 2>&1; echo "Exit-Code: $?"
           echo "--- Ausgabe der App ---"; tail -60 "$RUNNER_TEMP/app-out.txt" || true
           echo "--- Ergebnis ---"; cat "$R" || true
           if ! grep -q FA_SMOKE_OK "$R" 2>/dev/null; then
