@@ -102,7 +102,7 @@ jobs:
           gh release upload "v$V" "$F" || echo "::warning::$F ist in Release v$V schon vorhanden – bitte die Version in package.json erhöhen."
 
   mac:
-    runs-on: macos-14 # Apple Silicon (M1); macos-latest hatte oft keine freien Rechner
+    runs-on: macos-15 # Apple Silicon (M1); macos-latest hatte oft keine freien Rechner
     timeout-minutes: 60
     env:
       LLAMA_CPP_TAG: b12556
@@ -211,7 +211,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-14]
+        os: [windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     continue-on-error: true
