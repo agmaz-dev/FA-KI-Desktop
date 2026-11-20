@@ -11,6 +11,10 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.7
+
+- Spracherkennung: großzügigeres Zeitlimit (mindestens 1 Minute), damit der erste Durchgang nach dem Start auf langsameren Rechnern nicht abbricht.
+
 ## Neu in 2.5.6
 
 - Lange Gespräche: Die App hält jetzt immer Platz für die Antwort (samt „Gedanken“) frei und misst, wie viele Tokens der Text wirklich braucht. Kein „keine Antwort erhalten“ mehr bei vollem Kontext; falls doch, eine klare Meldung.

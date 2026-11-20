@@ -248,4 +248,7 @@ jobs:
           node scripts/chat-probe.js "$LLAMA" chat-probe.gguf
       - name: Phonon und Voxtral ausprobieren
         shell: bash
+        # Die Mac-Rechner von GitHub haben keine echte Grafikkarte: Voxtral braucht dort bis zu 2,5 Minuten
+        env:
+          FA_VOXTRAL_TIMEOUT_MS: '300000'
         run: node scripts/voice-probe.js "$PTTS" "$LLAMA" probe-work
