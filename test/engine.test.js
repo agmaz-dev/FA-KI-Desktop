@@ -133,3 +133,45 @@ test('Engine: fehlende Datei llama-server wird verständlich gemeldet', async ()
   await assert.rejects(e.chatStream({ model: 'x', messages: [] }, () => {}), /llama-server\) fehlt/);
   assert.strictEqual(eng.findServerExe('/nix/gibt/es/nicht', '/auch/nicht'), '');
 });
+
+// 2.5.4: verständliche Fehler und Wiederholung mit kleinerem Kontext
+test('engineError erkennt Speichermangel und unbekannte Bauart', () => {
+  const { engineError } = require('../lib/engine');
+  const m = engineError(['ggml_metal: failed to allocate buffer of size 9000 MiB']);
+  assert.equal(m.memory, true);
+  assert.match(m.message, /Arbeitsspeicher/);
+  const a = engineError(["llama_model_load: error loading model: unknown model architecture: 'foo'"]);
+  assert.ok(!a.memory);
+  assert.match(a.message, /nicht unterstützt/);
+});
+
+test('Engine versucht bei Speichermangel einmal mit 8192 Kontext', async () => {
+  const { Engine } = require('../lib/engine');
+  const { EventEmitter } = require('events');
+  const ctxs = [];
+  const fake = (exe, args) => {
+    ctxs.push(Number(args[args.indexOf('-c') + 1]));
+    const c = new EventEmitter();
+    c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.pid = 0; c.exitCode = null;
+    c.kill = () => {};
+    setTimeout(() => { c.stderr.emit('data', 'failed to allocate buffer'); c.exitCode = 1; c.emit('exit', 1); }, 20);
+    return c;
+  };
+  let before = 0;
+  const e = new Engine({ exePath: process.execPath, getSettings: () => ({}), resolveModel: () => ({ file: 'x.gguf' }), spawnFn: fake, beforeStart: () => { before++; } });
+  await assert.rejects(e.ensure('m', 32768), /Arbeitsspeicher/);
+  assert.deepEqual(ctxs, [32768, 8192]);
+  assert.equal(before, 1);
+});
+
+test('Orphans merkt sich Nummern und räumt nur llama-server auf', async () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { Orphans } = require('../lib/orphans');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'orph-')), 'p.json');
+  const o = new Orphans(f);
+  o.add(process.pid);
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), [process.pid]);
+  assert.equal(await new Orphans(f).cleanup(), 0); // eigene Nummer / kein llama-server -> nichts beenden
+  o.clear();
+  assert.equal(fs.existsSync(f), false);
+});

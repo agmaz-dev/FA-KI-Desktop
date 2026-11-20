@@ -1,4 +1,5 @@
 'use strict';
+const T0 = Date.now();
 // Starttest (CI): sehr früh protokollieren, auch wenn ein require scheitert
 if (process.env.FA_SMOKE) { try { require('fs').appendFileSync(process.env.FA_SMOKE, 'LOG main.js startet ' + process.versions.electron + '\n'); } catch { /* egal */ } }
 const { app, BrowserWindow, ipcMain, session, shell, dialog, Menu, safeStorage, nativeTheme, clipboard } = require('electron');
@@ -27,6 +28,7 @@ const hf = require('./lib/hf');
 const { SysStats } = require('./lib/sysstats');
 const mail = require('./lib/mail');
 const { Panel } = require('./lib/panel');
+const { Orphans } = require('./lib/orphans');
 
 let win = null;
 let store = null;
@@ -44,6 +46,25 @@ let mcp = null;
 let gdrive = null;
 let hfweb = null;
 const procs = new Procs();
+let orphans = null;
+// Wenig Speicher (bis 16 GB): Spracherkennung und Chat-Modell nicht gleichzeitig im Speicher halten.
+const LOW_MEMORY = os.totalmem() < 24 * 1024 ** 3;
+
+/** Alle selbst gestarteten Hintergrundprogramme sofort beenden – bei jedem Programmende. */
+let shutDown = false;
+function shutdown() {
+  if (shutDown) return;
+  shutDown = true;
+  try { procs.killAll(); } catch { /* egal */ }
+  try { if (engine) engine.killNow(); } catch { /* egal */ }
+  try { if (voxtral) voxtral.killNow(); } catch { /* egal */ }
+  try { if (phonon) phonon.cancel(); } catch { /* egal */ }
+  try { if (mcp) mcp.closeAll().catch(() => {}); } catch { /* egal */ }
+  try { if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; } } catch { /* egal */ }
+  try { if (orphans) orphans.clear(); } catch { /* egal */ }
+}
+function exitApp(code) { shutdown(); app.exit(code); }
+process.on('exit', shutdown);
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
@@ -116,8 +137,8 @@ function createWindow() {
     // Für den Test in der CI: Fenster ist da -> melden und beenden
     if (process.env.FA_SMOKE) setTimeout(() => {
       win.webContents.executeJavaScript('document.querySelectorAll("#app").length + ":" + (document.getElementById("input") ? 1 : 0)')
-        .then((r) => { smoke('FA_SMOKE_OK ' + r + ' sichtbar=' + win.isVisible()); app.exit(0); })
-        .catch((e) => { smoke('FA_SMOKE_FAIL ' + e); app.exit(1); });
+        .then((r) => { smoke('FA_SMOKE_OK ' + r + ' sichtbar=' + win.isVisible()); exitApp(0); })
+        .catch((e) => { smoke('FA_SMOKE_FAIL ' + e); exitApp(1); });
     }, 4000);
   });
   win.webContents.on('render-process-gone', (_e, d) => startLog('Oberfläche abgestürzt: ' + JSON.stringify(d)));
@@ -132,17 +153,18 @@ function createWindow() {
 
 // Startfehler sichtbar machen: Protokolldatei + Meldung statt still hängen zu bleiben
 function startLog(text) {
-  try { fs.appendFileSync(path.join(app.getPath('userData'), 'start-protokoll.log'), `[${new Date().toISOString()}] ${text}\n`); } catch { /* egal */ }
-  smoke('LOG ' + text);
+  const ms = Date.now() - T0;
+  try { fs.appendFileSync(path.join(app.getPath('userData'), 'start-protokoll.log'), `[${new Date().toISOString()}] +${ms} ms ${text}\n`); } catch { /* egal */ }
+  smoke(`LOG +${ms}ms ${text}`);
 }
 /** Nur für den Test in der CI: FA_SMOKE = Pfad einer Ergebnisdatei. */
 function smoke(text) { if (process.env.FA_SMOKE) { try { fs.appendFileSync(process.env.FA_SMOKE, text + '\n'); } catch { /* egal */ } } }
 function startFailed(e) {
   const msg = String((e && e.stack) || e);
   startLog('FEHLER ' + msg);
-  if (process.env.FA_SMOKE) { smoke('FA_SMOKE_FAIL ' + msg); app.exit(1); return; }
+  if (process.env.FA_SMOKE) { smoke('FA_SMOKE_FAIL ' + msg); exitApp(1); return; }
   try { dialog.showErrorBox('FA KI Desktop – Startfehler', 'Die App konnte nicht starten:\n\n' + String((e && e.message) || e) + '\n\nDetails: ' + path.join(app.getPath('userData'), 'start-protokoll.log')); } catch { /* egal */ }
-  app.exit(1);
+  exitApp(1);
 }
 process.on('uncaughtException', (e) => { startLog('uncaughtException ' + String((e && e.stack) || e)); if (!win) startFailed(e); });
 process.on('unhandledRejection', (e) => startLog('unhandledRejection ' + String((e && e.stack) || e)));
@@ -164,18 +186,24 @@ if (!gotLock) {
   app.whenReady().then(() => {
     startLog(`Start ${app.getVersion()} auf ${process.platform} ${os.release()}`);
     const dataDir = app.getPath('userData');
+    orphans = new Orphans(path.join(dataDir, 'engine-pids.json'));
     store = new Store(dataDir);
+    startLog('Einstellungen geladen');
     models = new ModelStore(() => store.getSettings().modelDir || path.join(dataDir, 'models'));
     engine = new Engine({
       exePath: findServerExe(process.resourcesPath, __dirname),
       getSettings: () => store.getSettings(),
       resolveModel: (name) => models.find(name),
       onStatus: (text) => send('models:engineStatus', { text }),
+      onSpawn: (pid) => orphans.add(pid),
+      // Wenig Speicher: Spracherkennung vor dem Laden eines Chat-Modells beenden (startet beim Mikrofon wieder)
+      beforeStart: () => { if (LOW_MEMORY && voxtral && voxtral.running()) { startLog('Spracherkennung beendet, um Speicher für das Chat-Modell freizumachen'); voxtral.stop(); } },
     });
     speech = new SpeechManager();
     const bundled = app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled');
     phonon = new Phonon(dataDir, bundled, (p) => send('speech:progress', p));
     voxtral = new Voxtral(dataDir, () => findServerExe(process.resourcesPath, __dirname), (p) => send('speech:progress', p));
+    voxtral.onSpawn = (pid) => orphans.add(pid);
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       cb(permission === 'media' || permission === 'clipboard-sanitized-write');
@@ -198,20 +226,40 @@ if (!gotLock) {
     };
     mcp = new McpManager({ dataDir, secure, openAuth: openAuthWindow, onChange: () => send('mcp:changed', {}) });
     gdrive = new GDrive({ store: { get: () => mcp._auth('gdrive'), set: (o) => mcp._setAuth('gdrive', o) }, openAuth: openAuthWindow });
-    mcp.connectAll();
+    // Alte Einstellungen umstellen, bevor die Oberfläche sie liest
+    {
+      const st = store.getSettings();
+      if (!['phonon', 'server'].includes(st.ttsEngine)) store.setSettings({ ttsEngine: 'phonon' });
+      // Frühere Versionen: alter Chatterbox-Server ist abgeschafft
+      if (/voice_server\.py/.test(st.ttsServerCmd || '')) store.setSettings({ ttsEngine: 'phonon', ttsServerAuto: false, ttsServerCmd: '' });
+    }
     registerIpc();
     createWindow();
-    // Reste älterer Versionen entfernen: Piper, Supertonic und Whisper gibt es seit 2.5.1 nicht mehr.
-    for (const d of ['piper', 'voices-piper', 'supertonic', 'whisper']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
-    // Spracherkennung (Voxtral) vorwärmen, falls geladen.
-    setTimeout(() => { warmStt(); }, 3000);
-    let st = store.getSettings();
-    if (!['phonon', 'server'].includes(st.ttsEngine)) { store.setSettings({ ttsEngine: 'phonon' }); st = store.getSettings(); }
-    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft
-    if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
-      store.setSettings({ ttsEngine: 'phonon', ttsServerAuto: false, ttsServerCmd: '' });
-      st = store.getSettings();
-    }
+    startLog('Fenster erstellt');
+    // Alles Weitere erst, wenn das Fenster steht – der Start bleibt schnell.
+    let later = false;
+    const afterWindow = () => {
+      if (later) return;
+      later = true;
+      startBackground(dataDir);
+    };
+    win.webContents.once('did-finish-load', () => setTimeout(afterWindow, 300));
+    setTimeout(afterWindow, 15000);
+  }).catch(startFailed);
+  app.on('window-all-closed', () => app.quit());
+}
+
+/** Hintergrundarbeiten nach dem Start (Verbindungen, Aufräumen, Vorwärmen). */
+function startBackground(dataDir) {
+  startLog('Hintergrundstart');
+  orphans.cleanup().then((n) => { if (n) startLog(`${n} hängengebliebene Engine(s) vom letzten Lauf beendet`); }).catch(() => {});
+  mcp.connectAll();
+  // Reste älterer Versionen entfernen: Piper, Supertonic und Whisper gibt es seit 2.5.1 nicht mehr.
+  for (const d of ['piper', 'voices-piper', 'supertonic', 'whisper']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
+  // Spracherkennung (Voxtral) vorwärmen – nur bei viel Speicher, sonst startet sie beim ersten Mikrofon-Klick.
+  if (!LOW_MEMORY) setTimeout(() => { warmStt(); }, 3000);
+  try {
+    const st = store.getSettings();
     voiceInst.syncServer();
     if (st.ttsServerAuto && st.ttsEngine === 'server') {
       procs.ensureTtsServer(st).then(async (r) => {
@@ -222,8 +270,7 @@ if (!gotLock) {
         }
       }).catch(() => {});
     }
-  }).catch(startFailed);
-  app.on('window-all-closed', () => app.quit());
+  } catch (e) { startLog('Hintergrundstart: ' + String((e && e.message) || e)); }
 }
 
 // Diese Felder setzt nur der Hauptprozess (sie werden als Befehl ausgeführt bzw. als Arbeitsordner benutzt).
@@ -773,11 +820,4 @@ async function getOcrWorker() {
   return ocrWorker;
 }
 
-app.on('before-quit', () => {
-  procs.killAll();
-  if (engine) engine.stop();
-  if (voxtral) voxtral.stop();
-  if (mcp) mcp.closeAll().catch(() => {});
-  if (phonon) phonon.cancel();
-  if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
-});
+app.on('before-quit', shutdown);

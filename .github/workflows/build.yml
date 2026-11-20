@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      LLAMA_CPP_TAG: b12530 # fertige Windows-Version (Vulkan, läuft auf AMD/NVIDIA/Intel), fest angepinnt
+      LLAMA_CPP_TAG: b12556 # fertige Windows-Version (Vulkan, läuft auf AMD/NVIDIA/Intel), fest angepinnt
       PTTS_TAG: v0.7.1 # Phonon-Laufzeit (gradium-ai/xn-ptts), fest angepinnt
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -105,7 +105,7 @@ jobs:
     runs-on: macos-latest # Apple Silicon (M1)
     timeout-minutes: 60
     env:
-      LLAMA_CPP_TAG: b12530
+      LLAMA_CPP_TAG: b12556
       PTTS_TAG: v0.7.1
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -216,7 +216,7 @@ jobs:
     timeout-minutes: 50
     continue-on-error: true
     env:
-      LLAMA_CPP_TAG: b12530
+      LLAMA_CPP_TAG: b12556
       PTTS_TAG: v0.7.1
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -241,6 +241,11 @@ jobs:
             echo "PTTS=$(find x -type f -name ptts | head -1)" >> "$GITHUB_ENV"
             echo "LLAMA=$(find x -type f -name llama-server | head -1)" >> "$GITHUB_ENV"
           fi
+      - name: Chat über die Engine ausprobieren
+        shell: bash
+        run: |
+          curl -sSfL --retry 3 -o chat-probe.gguf "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+          node scripts/chat-probe.js "$LLAMA" chat-probe.gguf
       - name: Phonon und Voxtral ausprobieren
         shell: bash
         run: node scripts/voice-probe.js "$PTTS" "$LLAMA" probe-work

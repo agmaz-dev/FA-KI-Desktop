@@ -11,6 +11,14 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.4
+
+- Schnellerer Start: das Fenster kommt zuerst, Verbindungen (MCP, Google Drive) und Vorwärmen laufen danach im Hintergrund. Das Startprotokoll zeigt die Zeit jedes Schritts.
+- Keine hängenden Hintergrundprogramme mehr: Engine, Spracherkennung und Sprachausgabe werden bei jedem Programmende beendet. Reste nach einem Absturz räumt der nächste Start auf.
+- Weniger Abstürze beim Laden: bei bis zu 16 GB Speicher wird die Spracherkennung vor dem Laden eines Chat-Modells beendet und nicht mehr beim Start vorgewärmt. Reicht der Speicher nicht, lädt die App das Modell einmal mit kleinerem Kontext neu.
+- Verständliche Fehlermeldungen (zu wenig Speicher, nicht unterstütztes Modell, fehlende Datei).
+- Neue Engine llama.cpp b12556 (Mac Metal, Windows Vulkan).
+
 ## Neu in 2.5.3
 - **Start abgesichert:** Läuft schon eine FA-KI-Instanz ohne Fenster, öffnet ein erneuter Start (oder ein Klick aufs Dock-Symbol) ein Fenster. Scheitert der Start, zeigt die App eine Fehlermeldung und schreibt `start-protokoll.log` in den Datenordner.
 - Die Installer werden in der CI jetzt auch gestartet: Erst wenn das Fenster aufgeht, gilt der Build als gut.
