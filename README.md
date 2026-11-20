@@ -11,6 +11,16 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.1
+- **Neues Design im Apple-Stil:** Einstellungen mit einer Zeile pro Einstellung, Gruppen-Kästen, farbigen Symbolen und Suchfeld. Die Seitenleiste der Einstellungen ist aus Glas (Mac: Vibrancy, Windows 11: Acrylic). Jede Änderung gilt sofort, ohne „Speichern“. Chatfenster neu gestaltet, Blau als Akzent.
+- **Neues Logo** als App-, Desktop- und Dock-Symbol und in der App.
+- **Diktieren:** blauer Rahmen, Wellenform nach der echten Stimme, roter Stopp-Knopf. Mit Voxtral erscheint der Text schon während des Sprechens.
+- **Mikrofon als ein Knopf:** unterbricht das Vorlesen und hört zu, nochmal Klick beendet. Der Knopf „Vorlesen stoppen“ entfällt.
+- **Token-Anzeige im Chat** ein- und ausschaltbar (Allgemein).
+- **Supertonic und Whisper entfernt.** Diktieren mit Voxtral, Vorlesen mit Phonon (oder „Meine Stimme“ unter Windows). Türkischen Text liest die System-Stimme. Alte Dateien werden beim Start aufgeräumt.
+- **Bibliothek und Erkunden** sind eigene Menüpunkte in den Einstellungen.
+- **MCP:** neuer Menüpunkt mit Karten für GitHub, Linear, Notion, Sentry, Atlassian, Cloudflare und Google Drive („Einrichten“ öffnet ein Anmeldefenster) und eigenen MCP-Servern (Befehl auf diesem Rechner oder Webadresse). GitHub wird dort eingerichtet statt unter „Internet und Agent“.
+
 ## Neu in 2.5.0
 - **Mehrere Downloads:** Bis zu 3 Modelle laden gleichzeitig, weitere warten in einer Reihe. Jeder Download hat eigenen Fortschritt und eigenes „Abbrechen“ (Liste links unten, in der Bibliothek und in Erkunden).
 - **Hugging-Face-Link im Suchfeld:** Ein Link `https://huggingface.co/autor/name` oder einfach `autor/name` in „Erkunden“ öffnet direkt dieses Modell, auch wenn es in den Suchtreffern fehlt.

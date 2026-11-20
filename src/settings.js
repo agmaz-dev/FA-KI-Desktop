@@ -1,13 +1,17 @@
-import { el, $, icon, formRow, selectOf, input, textarea, switchRow, newId } from './ui.js';
+import { el, icon, newId } from './ui.js';
+import { mountMcp } from './mcp.js';
 
-// Aufbau wie bei Bionic: Gruppen links, „Erkunden“ und „Bibliothek“ stehen unter „Lokale Modelle“.
+// Einstellungen im Apple-Stil: Seitenleiste aus Glas links, rechts Gruppen mit einer Zeile pro Einstellung.
+// Jede Änderung gilt sofort (kein „Speichern“-Knopf).
 const GROUPS = [
-  ['App', [['general', 'Allgemein', 'gear'], ['profiles', 'Profile', 'user']]],
-  ['Assistent', [['tools', 'Internet und Agent', 'globe'], ['speech', 'Sprache', 'speaker']]],
-  ['Lokale Modelle', [['library', 'Modelle', 'library'], ['ai', 'Standardwerte für lokale Modelle', 'sliders']]],
-  ['System', [['data', 'Daten und Info', 'download']]],
+  ['App', [['general', 'Allgemein', 'gear', '#8e8e93'], ['profiles', 'Profile', 'user', '#0a84ff']]],
+  ['Assistent', [['tools', 'Internet und Agent', 'globe', '#30b0c7'], ['speech', 'Sprache', 'wave', '#ff375f']]],
+  ['Integrationen', [['mcp', 'MCP', 'plug', '#5e5ce6']]],
+  ['Lokale Modelle', [['explore', 'Erkunden', 'compass', '#ff9f0a'], ['library', 'Bibliothek', 'cube', '#bf5af2'], ['ai', 'Standardwerte', 'sliders', '#8e8e93']]],
+  ['System', [['data', 'Daten und Info', 'info', '#8e8e93']]],
 ];
-const TAB_TITLE = { ...Object.fromEntries(GROUPS.flatMap(([, items]) => items.map(([id, label]) => [id, label]))), explore: 'Modelle', library: 'Modelle' };
+const ITEMS = GROUPS.flatMap(([, items]) => items);
+const TITLE = Object.fromEntries(ITEMS.map(([id, label]) => [id, label]));
 
 export const PROFILE_FIELDS = [
   ['fullName', 'Vollständiger Name'],
@@ -41,23 +45,147 @@ export function profilePrompt(p) {
   );
 }
 
+const isMac = /Mac/i.test(navigator.platform);
+const cleanErr = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+const sec1 = (x) => Number(x).toFixed(1).replace('.', ',');
+
+// ---------- Bausteine ----------
+function tile(name, color, size = 20) {
+  const t = el('span', 'ap-tile');
+  t.style.background = color;
+  t.style.width = t.style.height = size + 'px';
+  t.style.borderRadius = Math.round(size / 4) + 'px';
+  t.innerHTML = icon(name, Math.round(size * 0.65));
+  return t;
+}
+function btn(text, onclick, cls = '') {
+  const b = el('button', 'ap-btn' + (cls ? ' ' + cls : ''), text);
+  b.type = 'button';
+  if (onclick) b.onclick = onclick;
+  return b;
+}
+function okBadge(text) {
+  const s = el('span', 'ap-ok');
+  s.innerHTML = icon('check', 12);
+  s.appendChild(document.createTextNode(text));
+  return s;
+}
+function popup(options, value, onChange, label) {
+  const w = el('span', 'ap-pop');
+  const s = el('select');
+  if (label) s.setAttribute('aria-label', label);
+  for (const [v, t] of options) { const o = el('option', null, t); o.value = v; s.appendChild(o); }
+  s.value = value;
+  s.onchange = () => onChange(s.value);
+  w.append(s);
+  w.insertAdjacentHTML('beforeend', icon('updown', 12));
+  return w;
+}
+function toggle(checked, onChange, label) {
+  const w = el('label', 'ap-sw');
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!checked;
+  if (label) cb.setAttribute('aria-label', label);
+  cb.onchange = () => onChange(cb.checked);
+  w.append(cb, el('span'));
+  return w;
+}
+function field(value, { placeholder = '', type = 'text', width, onInput, onChange } = {}) {
+  const i = el('input', 'ap-field');
+  i.type = type; i.value = value ?? ''; i.placeholder = placeholder;
+  if (width) i.style.width = width;
+  if (onInput) i.addEventListener('input', () => onInput(i.value));
+  if (onChange) i.addEventListener('change', () => onChange(i.value));
+  return i;
+}
+function area(value, rows, onInput, placeholder = '') {
+  const t = el('textarea', 'ap-field ap-area');
+  t.rows = rows; t.value = value ?? ''; t.placeholder = placeholder;
+  t.addEventListener('input', () => onInput(t.value));
+  return t;
+}
+/** Kleines Menü hinter „···“. items: [[Text, Funktion, gefährlich?]] */
+function moreMenu(items, label) {
+  const wrap = el('span', 'ap-more');
+  const b = btn('', null, 'ap-icon');
+  b.innerHTML = icon('dots', 16);
+  b.setAttribute('aria-label', label || 'Weitere Aktionen');
+  const m = el('div', 'ap-menu hidden');
+  for (const [t, fn, danger] of items) {
+    const i = el('button', danger ? 'danger' : '', t);
+    i.type = 'button';
+    i.onclick = () => { m.classList.add('hidden'); fn(); };
+    m.appendChild(i);
+  }
+  b.onclick = (e) => { e.stopPropagation(); document.querySelectorAll('.ap-menu').forEach((x) => x !== m && x.classList.add('hidden')); m.classList.toggle('hidden'); };
+  document.addEventListener('click', () => m.classList.add('hidden'));
+  wrap.append(b, m);
+  return wrap;
+}
+function section(body, title, foot) {
+  const s = el('section', 'ap-sec');
+  if (title) s.appendChild(el('h2', 'ap-h', title));
+  const box = el('div', 'ap-box');
+  s.appendChild(box);
+  if (foot) s.appendChild(el('div', 'ap-foot', foot));
+  body.appendChild(s);
+  return box;
+}
+function row(box, title, desc, ...ctrls) {
+  const r = el('div', 'ap-row');
+  const l = el('div', 'ap-lbl');
+  const t = el('div', 'ap-t', title);
+  l.appendChild(t);
+  let d = null;
+  if (desc != null) { d = el('div', 'ap-d', desc); l.appendChild(d); }
+  r.appendChild(l);
+  const c = el('div', 'ap-ctl');
+  ctrls.filter(Boolean).forEach((x) => c.appendChild(x));
+  r.appendChild(c);
+  box.appendChild(r);
+  r.desc = (text) => { if (!d) { d = el('div', 'ap-d'); l.appendChild(d); } d.textContent = text; };
+  return r;
+}
+function hero(body, name, color, title, text) {
+  const h = el('div', 'ap-box ap-hero');
+  h.appendChild(tile(name, color, 52));
+  h.appendChild(el('div', 'ap-hero-t', title));
+  if (text) h.appendChild(el('div', 'ap-d', text));
+  body.appendChild(h);
+}
+
 /**
- * ctx: { settings, api, mount(build), close(), explore(root), library(root), apply(draft), hint, showProgress, hideProgress, onSaved(settings), speakSample(text, draft), onChatsCleared() }
+ * ctx: { settings, api, mount(build), close(), explore(root), library(root), apply(draft), hint, showProgress, hideProgress, onSaved(settings), stopSpeaking(), onChatsCleared(), dlWidget() }
  */
 export async function openSettings(ctx, startTab = 'general') {
   const draft = JSON.parse(JSON.stringify(ctx.settings));
   if (!Array.isArray(draft.profiles)) draft.profiles = [];
-  let tab = startTab;
-  const hist = [startTab];
+  let tab = TITLE[startTab] ? startTab : 'general';
+  const hist = [tab];
   let hpos = 0;
   const go = (id) => { if (id === tab) return; hist.length = hpos + 1; hist.push(id); hpos++; tab = id; render(); };
   let selProfile = draft.activeProfile || (draft.profiles[0] && draft.profiles[0].id) || '';
-
   const api = ctx.api;
-  const [info] = await Promise.all([api.app.info()]);
+  const info = await api.app.info();
+  let navFilter = '';
 
-  let vstat = { installed: false, busy: false };
-  const ST = (window.__stUi = window.__stUi || { running: false, done: '' });
+  // Sofort speichern (kurz gebündelt, damit Tippen nicht bei jedem Buchstaben alles neu lädt)
+  let pending = {};
+  let timer = null;
+  const save = (patch, now) => {
+    Object.assign(draft, patch);
+    Object.assign(pending, patch);
+    ctx.apply(draft);
+    clearTimeout(timer);
+    const run = async () => {
+      const p = pending; pending = {};
+      if (!Object.keys(p).length) return;
+      const next = await api.settings.set(p);
+      Object.assign(draft, { hfHasToken: next.hfHasToken, githubHasToken: next.githubHasToken, mailHasPassword: next.mailHasPassword });
+      await ctx.onSaved(next);
+    };
+    if (now) run(); else timer = setTimeout(run, 450);
+  };
+
   const PH = (window.__phUi = window.__phUi || { running: false, done: '' });
   const VX = (window.__vxUi = window.__vxUi || { running: false, done: '' });
   const VU = (window.__voiceUi = window.__voiceUi || { text: '', pct: null, running: false, done: '' });
@@ -65,629 +193,411 @@ export async function openSettings(ctx, startTab = 'general') {
     window.__voiceSub = api.voice.onProgress((p) => {
       VU.text = p.text || ''; VU.pct = p.pct;
       const t = document.getElementById('voiceProgText'); if (t) t.textContent = VU.text;
-      const f = document.getElementById('voiceProgFill'); if (f) f.style.width = (VU.pct == null ? 5 : VU.pct) + '%';
     });
   }
 
   async function render() {
     const st = await api.speech.status();
-    vstat = await api.voice.status();
+    const vstat = isMac ? { installed: false } : await api.voice.status();
     ctx.mount((m) => {
-      const nav = el('div', 'set-nav');
-      const back = el('button', 'back-btn');
-      back.innerHTML = icon('arrowleft', 17) + '<span>Zurück zur App</span>';
-      back.onclick = () => { ctx.apply(ctx.settings); ctx.close(); };
+      m.classList.add('ap');
+      // ----- Seitenleiste (Glas) -----
+      const nav = el('nav', 'ap-nav');
+      nav.setAttribute('aria-label', 'Einstellungen');
+      const q = el('div', 'ap-search');
+      q.insertAdjacentHTML('afterbegin', icon('search', 13));
+      const qi = el('input'); qi.type = 'search'; qi.placeholder = 'Suchen'; qi.value = navFilter; qi.setAttribute('aria-label', 'Einstellungen durchsuchen');
+      q.appendChild(qi);
+      nav.appendChild(q);
+      const back = el('button', 'ap-nav-item');
+      back.type = 'button';
+      back.append(tile('chevleft', '#636366'), document.createTextNode('Zurück zur App'));
+      back.onclick = () => { save({}, true); ctx.close(); };
       nav.appendChild(back);
-      nav.appendChild(el('h2', null, 'Einstellungen'));
-      for (const [group, items] of GROUPS) {
-        nav.appendChild(el('div', 'nav-group', group));
-        for (const [id, label, ic] of items) {
-          const b = el('button', id === tab || (id === 'library' && tab === 'explore') ? 'active' : '');
-          b.innerHTML = icon(ic, 17) + '<span>' + label + '</span>';
-          b.onclick = () => go(id);
-          nav.appendChild(b);
+      const list = el('div', 'ap-nav-list');
+      const drawNav = () => {
+        list.innerHTML = '';
+        const f = navFilter.trim().toLowerCase();
+        for (const [group, items] of GROUPS) {
+          const shown = items.filter(([, label]) => !f || label.toLowerCase().includes(f));
+          if (!shown.length) continue;
+          list.appendChild(el('div', 'ap-nav-grp', group));
+          for (const [id, label, ic, color] of shown) {
+            const b = el('button', 'ap-nav-item' + (id === tab ? ' on' : ''));
+            b.type = 'button';
+            b.append(tile(ic, color), document.createTextNode(label));
+            b.onclick = () => go(id);
+            list.appendChild(b);
+          }
         }
-      }
+      };
+      qi.addEventListener('input', () => { navFilter = qi.value; drawNav(); });
+      drawNav();
+      nav.appendChild(list);
       nav.appendChild(el('div', 'grow'));
       nav.appendChild(ctx.dlWidget());
-      const main = el('div', 'set-main');
-      const bar = el('div', 'set-bar');
-      const prev = el('button', 'icon-btn'); prev.innerHTML = icon('chevleft', 16); prev.title = 'Zurück'; prev.disabled = hpos <= 0;
-      const next = el('button', 'icon-btn'); next.innerHTML = icon('chevright', 16); next.title = 'Vorwärts'; next.disabled = hpos >= hist.length - 1;
-      prev.onclick = () => { hpos--; tab = hist[hpos]; render(); };
-      next.onclick = () => { hpos++; tab = hist[hpos]; render(); };
-      bar.append(prev, next, el('div', 'set-bar-title', TAB_TITLE[tab] || ''));
-      main.appendChild(bar);
-      const isModels = tab === 'explore' || tab === 'library';
-      const body = el('div', 'set-body' + (isModels ? ' flush' : ''));
-      main.appendChild(body);
-      const foot = el('div', 'set-foot');
-      const saved = el('span', 'msg-saved', '');
-      const cancel = el('button', 'btn', 'Zurück zur App');
-      cancel.onclick = () => { ctx.apply(ctx.settings); ctx.close(); };
-      const save = el('button', 'btn primary', 'Speichern');
-      save.onclick = async () => {
-        draft.numCtx = Math.max(2048, parseInt(draft.numCtx, 10) || 16384);
-        draft.temperature = Math.min(2, Math.max(0, parseFloat(draft.temperature) || 0));
-        const next = await api.settings.set(draft);
-        saved.textContent = 'Gespeichert ✓';
-        ctx.onSaved(next);
-        setTimeout(() => { saved.textContent = ''; }, 2500);
-      };
-      foot.append(saved, cancel, save);
-      if (!isModels) main.appendChild(foot);
-      m.append(nav, main);
 
-      if (isModels) {
-        const strip = el('div', 'seg-tabs');
-        for (const [id, label] of [['library', 'Meine Modelle'], ['explore', 'Auf Hugging Face suchen']]) {
-          const b = el('button', id === tab ? 'active' : '', label);
-          b.onclick = () => go(id);
-          strip.appendChild(b);
-        }
-        body.appendChild(strip);
-        const mroot = el('div', 'models-root');
-        body.appendChild(mroot);
-        if (tab === 'explore') ctx.explore(mroot); else ctx.library(mroot);
-      }
-      else ({ general, ai, tools, profiles, speech, data })[tab](body, st);
+      // ----- Rechte Seite -----
+      const main = el('div', 'ap-main');
+      const bar = el('div', 'ap-bar');
+      const prev = btn('', () => { hpos--; tab = hist[hpos]; render(); }, 'ap-icon'); prev.innerHTML = icon('chevleft', 16); prev.setAttribute('aria-label', 'Zurück'); prev.disabled = hpos <= 0;
+      const next = btn('', () => { hpos++; tab = hist[hpos]; render(); }, 'ap-icon'); next.innerHTML = icon('chevright', 16); next.setAttribute('aria-label', 'Vorwärts'); next.disabled = hpos >= hist.length - 1;
+      bar.append(prev, next, el('div', 'ap-bar-t', TITLE[tab]));
+      main.appendChild(bar);
+      const wide = tab === 'explore' || tab === 'library';
+      const scroller = el('div', 'ap-scroll' + (wide ? ' wide' : ''));
+      const body = el('div', 'ap-body');
+      scroller.appendChild(body);
+      main.appendChild(scroller);
+      m.append(nav, main);
+      if (tab === 'explore') ctx.explore(body);
+      else if (tab === 'library') ctx.library(body);
+      else if (tab === 'mcp') mountMcp(body, { api, hint: ctx.hint, draft, save, rerender: render });
+      else ({ general, profiles, tools, speech, ai, data })[tab](body, st, vstat);
     });
   }
-
-  const bind = (control, key, conv = (v) => v) => {
-    const h = () => { draft[key] = conv(control.type === 'checkbox' ? control.checked : control.value); ctx.apply(draft); };
-    control.addEventListener('input', h);
-    control.addEventListener('change', h);
-    return control;
-  };
-
-  const bindRender = (control, key) => { control.addEventListener('change', () => { draft[key] = control.value; render(); }); return control; };
 
   // ---------- Allgemein ----------
   function general(body) {
-    body.appendChild(el('h2', null, 'Allgemein'));
-    body.appendChild(formRow('Erscheinungsbild', bind(selectOf([['dark', 'Dunkel'], ['light', 'Hell']], draft.theme), 'theme')));
-    const FONTS = ['Segoe UI Variable Text', 'Segoe UI', 'Arial', 'Calibri', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Cambria', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', 'Constantia', 'Consolas', 'Courier New', 'Comic Sans MS'];
-    const dl = el('datalist'); dl.id = 'fontList'; FONTS.forEach((f) => { const o = el('option'); o.value = f; dl.appendChild(o); });
-    body.appendChild(dl);
-    const fontRow = (label, key, note) => {
-      const inp = input('text', draft[key] || '', { placeholder: 'Schriftname, z. B. Arial' });
-      inp.setAttribute('list', 'fontList');
-      inp.addEventListener('input', () => { draft[key] = inp.value.trim(); ctx.apply(draft); });
-      inp.addEventListener('focus', () => inp.select());
-      const r = formRow(label, inp); r.appendChild(el('div', 'note', note)); r.style.marginTop = '14px';
-      const sample = el('div', 'note', 'Der schnelle braune Fuchs springt über den faulen Hund 0123');
-      const upd = () => { sample.style.fontFamily = `"${inp.value.replace(/["';{}<>\\]/g, '')}", sans-serif`; sample.style.fontSize = '15px'; };
-      inp.addEventListener('input', upd); upd(); r.appendChild(sample);
-      return r;
-    };
-    body.appendChild(fontRow('Schriftart der App', 'fontUi', 'Menüs, Listen und Einstellungen. Wähle aus der Liste oder tippe den Namen einer Schrift ein, die auf Deinem PC installiert ist.'));
-    body.appendChild(fontRow('Schriftart der Antworten', 'fontAnswer', 'Chat-Antworten und Eingabe. Gleicher Name wie oben, falls Du überall dieselbe Schrift willst.'));
-    const fs = input('range', draft.fontSize, { min: 13, max: 21, step: 1 });
-    const fsl = el('div', 'note', `Textgröße: ${draft.fontSize} px`);
-    fs.addEventListener('input', () => { draft.fontSize = Number(fs.value); fsl.textContent = `Textgröße: ${fs.value} px`; ctx.apply(draft); });
-    const fr = formRow('Textgröße', fs); fr.appendChild(fsl); fr.style.marginTop = '14px';
-    body.appendChild(fr);
-    const se = switchRow('Enter sendet die Nachricht', 'Aus: Enter macht eine neue Zeile, gesendet wird mit Strg+Enter.', draft.sendOnEnter);
-    bind(se.cb, 'sendOnEnter');
-    body.appendChild(se.row);
-    const sc = switchRow('Cloud-Modelle in der Liste anzeigen', 'Achtung: Cloud-Modelle senden Deine Daten an fremde Server. Besser aus lassen.', draft.showCloud);
-    bind(sc.cb, 'showCloud');
-    body.appendChild(sc.row);
-  }
-
-  // ---------- KI ----------
-  function ai(body) {
-    body.appendChild(el('h2', null, 'Standardwerte für lokale Modelle'));
-    const sys = bind(textarea(draft.systemPrompt, 6), 'systemPrompt');
-    body.appendChild(formRow('Grundanweisung an die KI', sys, 'Gilt für jeden Chat. Die Angaben des aktiven Profils werden automatisch dazugegeben.'));
-    const two = el('div', 'two');
-    two.appendChild(formRow('Kontextlänge (Tokens)', bind(input('number', draft.numCtx, { min: 2048, step: 1024 }), 'numCtx'), 'Mehr = längere PDFs, aber langsamer. 16384 ist ein guter Start.'));
-    two.appendChild(formRow('Kreativität (Temperatur)', bind(input('number', draft.temperature, { min: 0, max: 2, step: 0.1 }), 'temperature'), '0 = sachlich, 1 = kreativ.'));
-    body.appendChild(two);
-    body.appendChild(formRow('Modell im Speicher halten', bind(selectOf([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive), 'keepAlive'), 'Danach wird es aus dem Arbeitsspeicher entladen und beim nächsten Chat automatisch neu geladen.'));
-    body.appendChild(formRow('Modellordner', el('div', 'note', 'Wird in der Bibliothek geändert (Erkunden → Bibliothek → Modellordner).'), ''));
-    body.appendChild(formRow('Standard-Denktiefe', bind(selectOf([['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']], draft.think), 'think'), 'Bei gpt-oss. Du kannst sie im Chat jederzeit ändern.'));
-
-    if (!/Mac/i.test(navigator.platform)) { // Auf dem Mac wird der Speicher automatisch erkannt
-      body.appendChild(el('h3', null, 'Dein PC (für „Erkunden“)'));
-      body.lastChild.style.margin = '22px 0 8px';
-      const hw = el('div', 'two');
-      hw.appendChild(formRow('Grafikspeicher (GB)', bind(input('number', draft.vramGb, { min: 2, max: 256, step: 1 }), 'vramGb', (v) => Math.max(2, parseInt(v, 10) || 16)), 'Damit „Erkunden“ zeigt, was ganz auf die Karte passt. RX 7800 XT: 16.'));
-      hw.appendChild(formRow('Arbeitsspeicher (GB)', bind(input('number', draft.ramGb, { min: 4, max: 1024, step: 1 }), 'ramGb', (v) => Math.max(4, parseInt(v, 10) || 32)), 'Für Modelle, die nur teilweise auf die Karte passen.'));
-      body.appendChild(hw);
+    hero(body, 'gear', '#8e8e93', 'Allgemein', 'Aussehen, Schrift und Bedienung der App.');
+    const look = section(body, 'Erscheinungsbild');
+    const r = el('div', 'ap-row ap-looks');
+    r.appendChild(el('div', 'ap-t grow', 'Erscheinungsbild'));
+    for (const [v, t] of [['dark', 'Dunkel'], ['light', 'Hell']]) {
+      const b = el('button', 'ap-look' + (draft.theme === v ? ' on' : ''));
+      b.type = 'button';
+      const pv = el('span', 'pv ' + v); pv.appendChild(el('i'));
+      b.append(pv, document.createTextNode(t));
+      b.onclick = () => { save({ theme: v }, true); render(); };
+      r.appendChild(b);
     }
-  }
+    look.appendChild(r);
 
-  // ---------- Internet und Agent ----------
-  function tools(body) {
-    body.appendChild(el('h2', null, 'Internet und Agent'));
-    const wt = switchRow('Internetsuche und Seiten lesen', 'Die KI darf im Web suchen, Seiten lesen und Shop-Links (eBay, Kleinanzeigen …) bauen. Ohne Konto und ohne Schlüssel; die Anfragen gehen direkt von Deinem PC raus. Nur bei Modellen mit Werkzeug-Unterstützung (z. B. gpt-oss, Qwen).', draft.webTools);
-    bind(wt.cb, 'webTools');
-    body.appendChild(wt.row);
-    const gt = switchRow('GitHub lesen', 'Die KI darf Deine Repos, Dateien und Builds auf GitHub lesen.', draft.githubTools);
-    bind(gt.cb, 'githubTools');
-    body.appendChild(gt.row);
-    const at = switchRow('Agent: Dateien, Befehle, Git und GitHub schreiben', 'Die KI arbeitet wie ein Programmierer: Dateien im Arbeitsordner lesen und ändern, Befehle und Tests ausführen, mit Git und GitHub arbeiten (Repos, Dateien, Branches, Pull Requests, Issues). Jede Änderung und jeder Befehl wird Dir vorher gezeigt und läuft nur nach Deinem „Erlauben“. Kein Löschen von Repos.', draft.agentTools);
-    bind(at.cb, 'agentTools');
-    body.appendChild(at.row);
+    const FONTS = [['', 'Systemschrift'], ...['Arial', 'Calibri', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Cambria', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', 'Constantia', 'Consolas', 'Courier New', 'Helvetica Neue', 'Avenir Next', 'New York'].map((f) => [f, f])];
+    const fontOpts = (cur) => (cur && !FONTS.some(([v]) => v === cur) ? [[cur, cur], ...FONTS] : FONTS);
+    const font = section(body, 'Schrift');
+    row(font, 'Schriftart der App', 'Menüs, Listen und Einstellungen.', popup(fontOpts(draft.fontUi), draft.fontUi || '', (v) => save({ fontUi: v }), 'Schriftart der App'));
+    row(font, 'Schriftart der Antworten', 'Chat-Antworten und Eingabefeld.', popup(fontOpts(draft.fontAnswer), draft.fontAnswer || '', (v) => { save({ fontAnswer: v }); sample.style.fontFamily = v ? `"${v}", serif` : ''; }, 'Schriftart der Antworten'));
+    const size = el('span', 'ap-range');
+    const sl = el('input'); sl.type = 'range'; sl.min = 13; sl.max = 21; sl.step = 1; sl.value = draft.fontSize; sl.setAttribute('aria-label', 'Textgröße');
+    sl.oninput = () => { save({ fontSize: Number(sl.value) }); sample.style.fontSize = sl.value + 'px'; };
+    size.append(el('small', null, 'A'), sl, el('big', null, 'A'));
+    row(font, 'Textgröße', null, size);
+    const pr = el('div', 'ap-row');
+    const sample = el('div', 'ap-sample', 'Der schnelle braune Fuchs springt über den faulen Hund 0123');
+    sample.style.fontFamily = draft.fontAnswer ? `"${draft.fontAnswer}", serif` : '';
+    sample.style.fontSize = draft.fontSize + 'px';
+    pr.appendChild(sample);
+    font.appendChild(pr);
 
-    body.appendChild(el('h3', null, 'Arbeitsordner'));
-    body.lastChild.style.margin = '22px 0 8px';
-    const dirNote = el('div', null, draft.agentDir || 'Noch kein Ordner gewählt.');
-    dirNote.style.cssText = 'font-family:Consolas,monospace;font-size:13.5px;word-break:break-all;margin-bottom:6px';
-    body.appendChild(dirNote);
-    body.appendChild(el('div', 'note', 'Nur in diesem Ordner darf die KI Dateien lesen, schreiben und Befehle ausführen. Wähle den Ordner Deines Projekts (oder einen leeren für ein neues).'));
-    const dr = el('div'); dr.style.cssText = 'display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap';
-    const pick = el('button', 'btn small', draft.agentDir ? 'Anderen Ordner wählen …' : 'Ordner wählen …');
-    pick.onclick = async () => { const n = await api.agent.pickDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); };
-    dr.appendChild(pick);
-    if (draft.agentDir) {
-      const op = el('button', 'btn small', 'Ordner öffnen'); op.onclick = () => api.agent.openDir();
-      const cl = el('button', 'btn small', 'Ordner entfernen'); cl.onclick = async () => { const n = await api.agent.clearDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); };
-      dr.append(op, cl);
-    }
-    body.appendChild(dr);
-    const chk = el('div', 'note', 'Prüfe Git und Node …');
-    body.appendChild(chk);
-    api.agent.check().then((r) => {
-      chk.textContent = (r.git ? 'Git gefunden: ' + r.git : 'Git nicht gefunden – für die Git-Werkzeuge bitte „Git für Windows“ von git-scm.com installieren.') + '   ' + (r.node ? 'Node gefunden: ' + r.node : 'Node nicht gefunden (nur nötig, wenn die KI JavaScript-Projekte ausführen soll).');
-    }).catch(() => { chk.textContent = ''; });
-
-    body.appendChild(el('h3', null, 'GitHub-Zugang'));
-    body.lastChild.style.margin = '22px 0 8px';
-    const tok = input('password', '', { placeholder: draft.githubHasToken ? 'Token ist gespeichert (zum Ersetzen neuen eintragen)' : 'GitHub-Token einfügen', autocomplete: 'off' });
-    body.appendChild(formRow('GitHub-Token', tok, 'Auf github.com unter Settings → Developer settings → Personal access tokens erzeugen. Zum Lesen reicht „Contents: Read-only“. Damit die KI auch schreiben darf (Repos anlegen, pushen, Pull Requests): klassisch Haken „repo“ und „workflow“, oder fein „Contents“, „Pull requests“, „Issues“, „Actions“ auf „Read and write“ und „Administration“ zum Anlegen von Repos. Der Token wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben. Für öffentliche Repos zum Lesen brauchst Du keinen.'));
-    const tstat = el('div', 'note', draft.githubHasToken ? 'Ein Token ist gespeichert.' : 'Kein Token gespeichert.');
-    const row = el('div');
-    row.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap';
-    const saveTok = el('button', 'btn small', 'Token speichern und prüfen');
-    saveTok.onclick = async () => {
-      const v = tok.value.trim();
-      if (!v) { tstat.textContent = 'Bitte zuerst einen Token einfügen.'; return; }
-      tstat.textContent = 'Prüfe …';
-      const r = await api.github.setToken(v);
-      if (r.ok) { tok.value = ''; draft.githubHasToken = true; tstat.textContent = 'Gespeichert. Angemeldet als ' + (r.login || '?') + '.'; }
-      else tstat.textContent = 'Nicht gespeichert: ' + r.error;
-    };
-    const delTok = el('button', 'btn small', 'Token entfernen');
-    delTok.onclick = async () => { await api.github.setToken(''); draft.githubHasToken = false; tstat.textContent = 'Token entfernt.'; };
-    row.append(saveTok, delTok);
-    body.appendChild(row);
-    body.appendChild(tstat);
-
-    // ----- E-Mail -----
-    body.appendChild(el('h3', null, 'E-Mail'));
-    body.lastChild.style.margin = '26px 0 8px';
-    const mt = switchRow('KI darf meine E-Mails lesen und (mit Bestätigung) senden', 'Lesen und Suchen im Posteingang geht ohne Nachfrage. Jede Mail zum Senden siehst Du vorher mit Empfänger und Text und musst sie jedes Mal erlauben. Anhänge werden nicht gelesen. Mailtexte sind für die KI nur Daten, keine Anweisungen.', draft.mailTools === true);
-    bind(mt.cb, 'mailTools');
-    body.appendChild(mt.row);
-    const prov = selectOf([['', 'Anbieter wählen …'], ['gmail', 'Gmail'], ['icloud', 'iCloud'], ['outlook', 'Outlook / Microsoft'], ['gmx', 'GMX'], ['webde', 'web.de'], ['own', 'Eigener Server']], '');
-    const PRE = { gmail: ['imap.gmail.com', 993, 'smtp.gmail.com', 465], icloud: ['imap.mail.me.com', 993, 'smtp.mail.me.com', 587], outlook: ['outlook.office365.com', 993, 'smtp-mail.outlook.com', 587], gmx: ['imap.gmx.net', 993, 'mail.gmx.net', 587], webde: ['imap.web.de', 993, 'smtp.web.de', 587] };
-    const fImap = bind(input('text', draft.mailImapHost), 'mailImapHost');
-    const fImapP = bind(input('number', draft.mailImapPort, { min: 1, max: 65535 }), 'mailImapPort', (v) => parseInt(v, 10) || 993);
-    const fSmtp = bind(input('text', draft.mailSmtpHost), 'mailSmtpHost');
-    const fSmtpP = bind(input('number', draft.mailSmtpPort, { min: 1, max: 65535 }), 'mailSmtpPort', (v) => parseInt(v, 10) || 465);
-    prov.addEventListener('change', () => {
-      const p = PRE[prov.value]; if (!p) return;
-      fImap.value = p[0]; fImapP.value = p[1]; fSmtp.value = p[2]; fSmtpP.value = p[3];
-      for (const [c, k, v] of [[fImap, 'mailImapHost', p[0]], [fImapP, 'mailImapPort', p[1]], [fSmtp, 'mailSmtpHost', p[2]], [fSmtpP, 'mailSmtpPort', p[3]]]) draft[k] = v;
-    });
-    body.appendChild(formRow('Anbieter', prov, 'Füllt die Serverangaben aus. Gmail, iCloud und Outlook brauchen ein App-Passwort (nicht Dein normales Passwort).'));
-    const mtwo = el('div', 'two');
-    mtwo.appendChild(formRow('E-Mail-Adresse (Anmeldename)', bind(input('text', draft.mailUser), 'mailUser')));
-    mtwo.appendChild(formRow('Absender (optional)', bind(input('text', draft.mailFrom), 'mailFrom'), 'z. B. Feridun Agmaz <name@example.de>'));
-    body.appendChild(mtwo);
-    const m2 = el('div', 'two');
-    m2.appendChild(formRow('Server zum Lesen (IMAP)', fImap));
-    m2.appendChild(formRow('Port', fImapP));
-    body.appendChild(m2);
-    const m3 = el('div', 'two');
-    m3.appendChild(formRow('Server zum Senden (SMTP)', fSmtp));
-    m3.appendChild(formRow('Port', fSmtpP, '465 oder 587'));
-    body.appendChild(m3);
-    const mpw = input('password', '', { placeholder: draft.mailHasPassword ? 'Passwort ist gespeichert (zum Ersetzen neues eintragen)' : 'App-Passwort einfügen', autocomplete: 'off' });
-    body.appendChild(formRow('App-Passwort', mpw, 'Wird verschlüsselt auf diesem PC gespeichert und nie an die KI gegeben.'));
-    const mrow = el('div', 'chips-row');
-    const mstat = el('div', 'note', '');
-    const msave = el('button', 'btn small primary', 'Speichern und testen');
-    msave.onclick = async () => {
-      mstat.textContent = 'Prüfe Anmeldung …';
-      await api.settings.set({ mailUser: draft.mailUser, mailFrom: draft.mailFrom, mailImapHost: draft.mailImapHost, mailImapPort: draft.mailImapPort, mailSmtpHost: draft.mailSmtpHost, mailSmtpPort: draft.mailSmtpPort });
-      if (mpw.value.trim()) { await api.mail.setPassword(mpw.value.trim()); mpw.value = ''; draft.mailHasPassword = true; }
-      const r = await api.mail.test();
-      mstat.textContent = r.ok ? 'Anmeldung klappt. Du kannst die KI jetzt nach Deinen Mails fragen (Schalter oben aktivieren und unten auf „Speichern“).' : 'Nicht angemeldet: ' + r.error;
-    };
-    const mdel = el('button', 'btn small', 'Passwort entfernen');
-    mdel.onclick = async () => { await api.mail.setPassword(''); draft.mailHasPassword = false; mstat.textContent = 'Passwort entfernt.'; };
-    mrow.append(msave, mdel);
-    body.appendChild(mrow);
-    body.appendChild(mstat);
+    const use = section(body, 'Bedienung');
+    row(use, 'Enter sendet die Nachricht', `Aus: Enter macht eine neue Zeile, gesendet wird mit ${isMac ? '⌘' : 'Strg'} + Enter.`, toggle(draft.sendOnEnter, (v) => save({ sendOnEnter: v }), 'Enter sendet'));
+    row(use, 'Token-Anzeige im Chat', 'Zeigt unter dem Eingabefeld den Kontext (z. B. „1 240 von 16 384 Tokens“) und unter jeder Antwort die Geschwindigkeit (Tokens pro Sekunde).', toggle(draft.showTokens, (v) => save({ showTokens: v }), 'Token-Anzeige im Chat'));
+    row(use, 'Cloud-Modelle in der Liste anzeigen', 'Cloud-Modelle senden Deine Daten an fremde Server. Besser aus lassen.', toggle(draft.showCloud, (v) => save({ showCloud: v }), 'Cloud-Modelle anzeigen'));
   }
 
   // ---------- Profile ----------
   function profiles(body) {
-    body.appendChild(el('h2', null, 'Profile'));
-    body.appendChild(el('div', 'note', 'Ein Profil enthält Absenderangaben (Name, Adresse, Unterschrift …). Wenn Du ein Profil wählst, benutzt die KI diese Angaben beim Schreiben von Briefen, E-Mails und Dokumenten. Du kannst mehrere Profile anlegen, auch für andere Personen.'));
-    body.lastChild.style.marginBottom = '14px';
-    const lay = el('div', 'prof-layout');
-    const list = el('div', 'prof-list');
-    for (const p of draft.profiles) {
-      const b = el('button', 'prof-item' + (p.id === selProfile ? ' active' : ''));
-      b.appendChild(el('span', null, p.label || 'Ohne Namen'));
-      b.appendChild(el('small', null, (p.id === draft.activeProfile ? 'aktiv · ' : '') + (p.fullName || '')));
-      b.onclick = () => { selProfile = p.id; render(); };
-      list.appendChild(b);
-    }
-    const add = el('button', 'btn small', '+ Neues Profil');
-    add.style.marginTop = '6px';
-    add.onclick = () => {
+    const box = section(body, 'Profile', 'Die KI benutzt das aktive Profil als Absender beim Schreiben von Briefen, E-Mails und Dokumenten.');
+    const colors = ['#0a84ff', '#bf5af2', '#30b0c7', '#ff9f0a', '#ff375f', '#32d74b'];
+    draft.profiles.forEach((p, i) => {
+      const av = el('span', 'ap-av', (p.label || '?').charAt(0).toUpperCase());
+      av.style.background = colors[i % colors.length];
+      const r = row(box, p.label || 'Ohne Namen', [p.fullName, p.company].filter(Boolean).join(' · ') || ' ');
+      r.insertBefore(av, r.firstChild);
+      r.classList.add('ap-click');
+      if (p.id === selProfile) r.classList.add('sel');
+      r.onclick = (e) => { if (e.target.closest('button')) return; selProfile = p.id; render(); };
+      const c = r.querySelector('.ap-ctl');
+      if (p.id === draft.activeProfile) c.appendChild(el('span', 'ap-badge', 'Aktiv'));
+      else c.appendChild(btn('Als aktiv setzen', () => { save({ activeProfile: p.id }, true); render(); }));
+    });
+    const addRow = el('div', 'ap-row end');
+    addRow.appendChild(btn('Profil hinzufügen …', () => {
       const p = { id: newId(), label: 'Neues Profil', fullName: '', company: '', address: '', email: '', phone: '', signature: '', language: 'de', notes: '' };
       draft.profiles.push(p);
       selProfile = p.id;
-      if (!draft.activeProfile) draft.activeProfile = p.id;
+      save({ profiles: draft.profiles, activeProfile: draft.activeProfile || p.id }, true);
       render();
-    };
-    list.appendChild(add);
-    lay.appendChild(list);
+    }));
+    box.appendChild(addRow);
 
     const p = draft.profiles.find((x) => x.id === selProfile);
-    const ed = el('div');
-    if (!p) {
-      ed.appendChild(el('div', 'note', 'Noch kein Profil vorhanden. Lege links Dein erstes Profil an, zum Beispiel „Privat“ oder „Firma“.'));
-    } else {
-      const f = (key, label, ta, note) => {
-        const c = ta ? textarea(p[key], ta) : input('text', p[key]);
-        c.addEventListener('input', () => { p[key] = c.value; });
-        if (key === 'label' || key === 'fullName') c.addEventListener('change', () => render());
-        return formRow(label, c, note);
-      };
-      ed.appendChild(f('label', 'Profilname', 0, 'z. B. Privat, Firma, Emine'));
-      const two = el('div', 'two');
-      two.appendChild(f('fullName', 'Vollständiger Name'));
-      two.appendChild(f('company', 'Firma / Organisation'));
-      ed.appendChild(two);
-      ed.appendChild(f('address', 'Adresse', 3));
-      const two2 = el('div', 'two');
-      two2.appendChild(f('email', 'E-Mail'));
-      two2.appendChild(f('phone', 'Telefon'));
-      ed.appendChild(two2);
-      ed.appendChild(f('signature', 'Grußformel / Unterschrift', 3, 'z. B. „Mit freundlichen Grüßen“ und Dein Name'));
-      const lang = selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Wie die Anfrage']], p.language || 'de');
-      lang.addEventListener('change', () => { p.language = lang.value; });
-      ed.appendChild(formRow('Sprache für Schreiben', lang));
-      ed.appendChild(f('notes', 'Weitere Hinweise', 3, 'z. B. Anrede-Stil, Branche, was die KI beachten soll'));
-      const act = el('div', 'chips-row');
-      const mk = el('button', 'btn small', p.id === draft.activeProfile ? 'Ist aktiv ✓' : 'Als aktiv setzen');
-      mk.onclick = () => { draft.activeProfile = p.id; render(); };
-      const dup = el('button', 'btn small', 'Duplizieren');
-      dup.onclick = () => { const c = { ...p, id: newId(), label: (p.label || 'Profil') + ' (Kopie)' }; draft.profiles.push(c); selProfile = c.id; render(); };
-      const del = el('button', 'btn small danger', 'Löschen');
-      del.onclick = () => {
+    if (!p) return;
+    const ed = section(body, p.label || 'Profil');
+    const upd = (k, v) => { p[k] = v; save({ profiles: draft.profiles }); };
+    const frow = (label, ctrl, top) => { const r = el('div', 'ap-row' + (top ? ' top' : '')); const l = el('label', 'ap-fl', label); r.append(l, ctrl); ed.appendChild(r); };
+    frow('Profilname', field(p.label, { onInput: (v) => upd('label', v), onChange: () => render(), width: '340px' }));
+    frow('Vollständiger Name', field(p.fullName, { placeholder: 'Vor- und Nachname', onInput: (v) => upd('fullName', v), width: '340px' }));
+    frow('Firma / Organisation', field(p.company, { placeholder: 'optional', onInput: (v) => upd('company', v), width: '340px' }));
+    frow('Adresse', area(p.address, 3, (v) => upd('address', v), 'Straße, PLZ Ort'), true);
+    frow('E-Mail', field(p.email, { placeholder: 'name@beispiel.de', onInput: (v) => upd('email', v), width: '340px' }));
+    frow('Telefon', field(p.phone, { placeholder: 'optional', onInput: (v) => upd('phone', v), width: '340px' }));
+    frow('Grußformel / Unterschrift', area(p.signature, 3, (v) => upd('signature', v), 'z. B. „Mit freundlichen Grüßen“'), true);
+    frow('Sprache für Schreiben', popup([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Wie die Anfrage']], p.language || 'de', (v) => upd('language', v), 'Sprache für Schreiben'));
+    frow('Weitere Hinweise', area(p.notes, 2, (v) => upd('notes', v), 'z. B. Anrede-Stil, Branche'), true);
+    const act = el('div', 'ap-actions');
+    act.append(
+      btn('Duplizieren', () => { const c = { ...p, id: newId(), label: (p.label || 'Profil') + ' (Kopie)' }; draft.profiles.push(c); selProfile = c.id; save({ profiles: draft.profiles }, true); render(); }),
+      btn('Profil löschen …', () => {
         if (!confirm(`Profil „${p.label}“ löschen?`)) return;
         draft.profiles = draft.profiles.filter((x) => x.id !== p.id);
-        if (draft.activeProfile === p.id) draft.activeProfile = '';
+        const active = draft.activeProfile === p.id ? '' : draft.activeProfile;
         selProfile = (draft.profiles[0] && draft.profiles[0].id) || '';
+        save({ profiles: draft.profiles, activeProfile: active }, true);
         render();
-      };
-      act.append(mk, dup, del);
-      ed.appendChild(act);
-    }
-    lay.appendChild(ed);
-    body.appendChild(lay);
+      }, 'red'),
+    );
+    body.appendChild(act);
+  }
+
+  // ---------- Internet und Agent ----------
+  function tools(body) {
+    hero(body, 'globe', '#30b0c7', 'Internet und Agent', 'Was die KI außerhalb des Chats darf. Jede Änderung und jeder Befehl braucht Dein „Erlauben“.');
+    const t = section(body, 'Werkzeuge der KI');
+    row(t, 'Internetsuche und Seiten lesen', 'Im Web suchen, Seiten lesen, Shop-Links bauen. Nur bei Modellen mit Werkzeugen (z. B. gpt-oss, Qwen).', toggle(draft.webTools, (v) => save({ webTools: v }), 'Internetsuche'));
+    row(t, 'Agent: Dateien, Befehle und Git', 'Arbeitet im Arbeitsordner wie ein Programmierer. Jede Aktion wird vorher gezeigt und läuft nur nach „Erlauben“. GitHub richtest Du unter MCP ein.', toggle(draft.agentTools, (v) => save({ agentTools: v }), 'Agent'));
+
+    const w = section(body, 'Arbeitsordner');
+    const dirRow = row(w, draft.agentDir || 'Noch kein Ordner gewählt', 'Nur hier darf die KI Dateien lesen, schreiben und Befehle ausführen.');
+    dirRow.querySelector('.ap-t').classList.add('mono');
+    dirRow.insertBefore(tile('folder', '#0a84ff', 28), dirRow.firstChild);
+    const dc = dirRow.querySelector('.ap-ctl');
+    if (draft.agentDir) dc.appendChild(btn(isMac ? 'Im Finder zeigen' : 'Im Explorer zeigen', () => api.agent.openDir()));
+    dc.appendChild(btn(draft.agentDir ? 'Ändern …' : 'Ordner wählen …', async () => { const n = await api.agent.pickDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); }));
+    if (draft.agentDir) dc.appendChild(moreMenu([['Ordner entfernen', async () => { const n = await api.agent.clearDir(); draft.agentDir = n.agentDir; ctx.settings.agentDir = n.agentDir; render(); }, true]], 'Arbeitsordner'));
+    const git = row(w, 'Git', null, el('span', 'ap-d', 'prüfe …'));
+    const node = row(w, 'Node', 'Nur nötig, wenn die KI JavaScript-Projekte ausführen soll.', el('span', 'ap-d', 'prüfe …'));
+    api.agent.check().then((r) => {
+      const set = (rw, ok, miss) => { const c = rw.querySelector('.ap-ctl'); c.innerHTML = ''; c.appendChild(ok ? okBadge('Gefunden') : el('span', 'ap-warn', miss)); };
+      set(git, r.git, isMac ? 'Fehlt – Xcode-Werkzeuge installieren' : 'Fehlt – „Git für Windows“ installieren');
+      set(node, r.node, 'Nicht gefunden');
+    }).catch(() => {});
+
+    // ----- E-Mail -----
+    const mail = section(body, 'E-Mail');
+    row(mail, 'KI darf meine E-Mails lesen und (mit Bestätigung) senden', 'Jede Mail zum Senden siehst Du vorher und musst sie erlauben. Anhänge werden nicht gelesen.', toggle(draft.mailTools === true, (v) => save({ mailTools: v }), 'E-Mail für die KI'));
+    const PRE = { gmail: ['imap.gmail.com', 993, 'smtp.gmail.com', 465], icloud: ['imap.mail.me.com', 993, 'smtp.mail.me.com', 587], outlook: ['outlook.office365.com', 993, 'smtp-mail.outlook.com', 587], gmx: ['imap.gmx.net', 993, 'mail.gmx.net', 587], webde: ['imap.web.de', 993, 'smtp.web.de', 587] };
+    const provOf = () => Object.keys(PRE).find((k) => PRE[k][0] === draft.mailImapHost) || (draft.mailImapHost ? 'own' : '');
+    const fImap = field(draft.mailImapHost, { width: '220px', onInput: (v) => save({ mailImapHost: v.trim() }) });
+    const fImapP = field(draft.mailImapPort, { width: '64px', type: 'number', onInput: (v) => save({ mailImapPort: parseInt(v, 10) || 993 }) });
+    const fSmtp = field(draft.mailSmtpHost, { width: '220px', onInput: (v) => save({ mailSmtpHost: v.trim() }) });
+    const fSmtpP = field(draft.mailSmtpPort, { width: '64px', type: 'number', onInput: (v) => save({ mailSmtpPort: parseInt(v, 10) || 465 }) });
+    row(mail, 'Anbieter', 'Gmail, iCloud und Outlook brauchen ein App-Passwort (nicht Dein normales Passwort).', popup([['', 'Bitte wählen …'], ['gmail', 'Gmail'], ['icloud', 'iCloud'], ['outlook', 'Outlook / Microsoft'], ['gmx', 'GMX'], ['webde', 'web.de'], ['own', 'Eigener Server']], provOf(), (v) => {
+      const p = PRE[v]; if (!p) return;
+      fImap.value = p[0]; fImapP.value = p[1]; fSmtp.value = p[2]; fSmtpP.value = p[3];
+      save({ mailImapHost: p[0], mailImapPort: p[1], mailSmtpHost: p[2], mailSmtpPort: p[3] });
+    }, 'Anbieter'));
+    row(mail, 'E-Mail-Adresse', null, field(draft.mailUser, { placeholder: 'name@beispiel.de', width: '280px', onInput: (v) => save({ mailUser: v.trim() }) }));
+    row(mail, 'Absender (optional)', null, field(draft.mailFrom, { placeholder: 'Name <name@beispiel.de>', width: '280px', onInput: (v) => save({ mailFrom: v.trim() }) }));
+    const pwRow = row(mail, 'App-Passwort', 'Verschlüsselt gespeichert, nie an die KI gegeben.');
+    const drawPw = (editing) => {
+      const c = pwRow.querySelector('.ap-ctl'); c.innerHTML = '';
+      if (draft.mailHasPassword && !editing) { c.append(okBadge('Gespeichert'), btn('Ändern …', () => drawPw(true))); return; }
+      const f = field('', { type: 'password', placeholder: 'App-Passwort einfügen', width: '220px' });
+      c.append(f, btn('Speichern', async () => { if (!f.value.trim()) return; const n = await api.mail.setPassword(f.value.trim()); draft.mailHasPassword = n.mailHasPassword; drawPw(false); }));
+    };
+    drawPw(false);
+    const adv = el('details', 'ap-details');
+    adv.appendChild(el('summary', null, 'Server-Einstellungen'));
+    const advBox = el('div', 'ap-box');
+    const imapRow = el('div', 'ap-row'); imapRow.append(el('label', 'ap-fl grow', 'Server zum Lesen (IMAP)'), fImap, fImapP);
+    const smtpRow = el('div', 'ap-row'); smtpRow.append(el('label', 'ap-fl grow', 'Server zum Senden (SMTP)'), fSmtp, fSmtpP);
+    advBox.append(imapRow, smtpRow);
+    adv.appendChild(advBox);
+    body.appendChild(adv);
+    const test = el('div', 'ap-actions');
+    const tmsg = el('span', 'ap-d grow', '');
+    test.append(tmsg, btn('Verbindung testen', async () => {
+      tmsg.textContent = 'Prüfe Anmeldung …';
+      save({}, true);
+      const r = await api.mail.test();
+      tmsg.textContent = r.ok ? 'Anmeldung klappt.' : 'Nicht angemeldet: ' + r.error;
+    }));
+    body.appendChild(test);
   }
 
   // ---------- Sprache ----------
-  function speech(body, st) {
-    body.appendChild(el('h2', null, 'Sprache'));
-    const isMac = /Mac/i.test(navigator.platform);
-    const engines = [['supertonic', 'Supertonic (Elena, Tessa, Caleb – Deutsch und Türkisch)'], ['phonon', 'Phonon (Anton, Nele … – mehrsprachig)']];
-    if (!isMac) engines.push(['server', 'Meine Stimme (OuteTTS, Deutsch)']);
-    const engVal = engines.some(([k]) => k === draft.ttsEngine) ? draft.ttsEngine : 'supertonic';
-    body.appendChild(formRow('Stimmen-Motor', bindRender(selectOf(engines, engVal), 'ttsEngine'), 'Türkisch spricht immer Supertonic. Ist der gewählte Motor nicht bereit, springt Supertonic ein.'));
-    body.appendChild(formRow('Stimme beim Vorlesen', bind(selectOf([['auto', 'Automatisch (Deutsch/Türkisch)'], ['de', 'Immer Deutsch'], ['tr', 'Immer Türkisch'], ['windows', isMac ? 'Nur System-Stimme' : 'Nur Windows-Stimme']], draft.ttsVoice), 'ttsVoice')));
-    // Tempo: bei Phonon „Wiedergabegeschwindigkeit“ in der Phonon-Karte, sonst hier
-    const speedRow = (label) => {
-      const sp = input('range', draft.ttsSpeed, { min: 0.7, max: 1.5, step: 0.05 });
-      const spl = el('div', 'note', `${Number(draft.ttsSpeed).toFixed(2).replace('.', ',')}×`);
-      sp.addEventListener('input', () => { draft.ttsSpeed = Number(sp.value); spl.textContent = `${Number(sp.value).toFixed(2).replace('.', ',')}×`; });
-      const r = formRow(label, sp); r.appendChild(spl);
-      return r;
-    };
-    if (engVal !== 'phonon') body.appendChild(speedRow('Sprechtempo'));
-    body.appendChild(phononCard(st, speedRow));
-    const stc = el('div', 'voice-card');
-    stc.appendChild(el('h3', null, 'Supertonic – schnelle, natürliche Stimmen (Deutsch und Türkisch)'));
-    stc.appendChild(el('div', 'note', 'Läuft direkt in der App, ganz ohne Zusatzprogramme, spricht flüssig und braucht wenig Speicher. Einmaliger Download von ca. 250 MB.'));
-    const stState = st.supertonic || { ready: false, voices: {} };
-    const stVoice = selectOf([['elena', 'Elena (weiblich)'], ['tessa', 'Tessa (weiblich)'], ['caleb', 'Caleb (männlich)']], draft.ttsStVoice || 'elena');
-    stVoice.addEventListener('change', async () => { draft.ttsStVoice = stVoice.value; await api.settings.set({ ttsStVoice: stVoice.value }); });
-    stc.appendChild(formRow('Stimme', stVoice));
-    const stNote = el('div', 'note', ST.done || (stState.ready ? 'Supertonic ist eingerichtet.' : 'Noch nicht eingerichtet.'));
-    const stBtn = el('button', 'btn small primary', stState.ready ? 'Neu laden / reparieren' : 'Supertonic einrichten');
-    const stCancel = el('button', 'btn small', 'Abbrechen');
-    stCancel.style.display = ST.running ? '' : 'none';
-    stBtn.disabled = ST.running;
-    stCancel.onclick = () => api.supertonic.cancel();
-    stBtn.onclick = async () => {
-      ST.running = true; ST.done = 'Wird geladen …';
-      render();
-      await api.settings.set({ ttsStVoice: draft.ttsStVoice || 'elena' });
-      const r = await api.supertonic.setup();
-      ST.running = false;
-      ctx.hideProgress();
-      if (r.ok) {
-        Object.assign(draft, r.settings);
-        ST.done = `Fertig. Erster Testsatz: ${Number(r.seconds).toFixed(1).replace('.', ',')} s. Supertonic ist jetzt aktiv, Tempo auf 1× gestellt. Klick unten auf „Speichern“.`;
-      } else ST.done = 'Fehler: ' + r.error + ' Es spricht die Windows-Stimme.';
-      render();
-    };
-    const stRow = el('div', 'chips-row'); stRow.append(stBtn, stCancel);
-    stc.append(stRow, stNote);
-    stc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
-    body.appendChild(stc);
-    const vc = el('div', 'voice-card');
-    vc.appendChild(el('h3', null, 'Meine Stimme (OuteTTS, Deutsch)'));
-    vc.appendChild(el('div', 'note', 'Klingt nach Deiner Aufnahme und läuft ganz auf diesem PC. Die Einrichtung ist einmalig (mehrere GB Download). Türkisch spricht Supertonic.'));
-    const sInfo = el('div', 'note', draft.ttsSampleFile ? 'Stimmprobe: ' + draft.ttsSampleFile : 'Noch keine Stimmprobe gewählt. Eine saubere Aufnahme von 10 bis 18 Sekunden (WAV) genügt.');
-    const bSample = el('button', 'btn small', 'Aufnahme wählen …');
-    bSample.onclick = async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sInfo.textContent = 'Stimmprobe: ' + r.name; } };
-    const bOute = el('button', 'btn small primary', vstat.installed ? 'Neu einrichten / reparieren' : 'Meine Stimme einrichten');
-    const bCancel = el('button', 'btn small', 'Abbrechen');
-    const pt = el('div', 'note', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Meine Stimme ist eingerichtet.' : '')));
-    pt.id = 'voiceProgText';
-    const bar = el('div', 'bar'); const fill = el('div'); fill.id = 'voiceProgFill'; fill.style.cssText = 'height:100%;background:var(--accent);width:' + (VU.pct == null ? 5 : VU.pct) + '%'; bar.appendChild(fill);
-    bar.style.display = VU.running ? '' : 'none';
-    bCancel.style.display = VU.running ? '' : 'none';
-    bOute.disabled = VU.running;
-    bCancel.onclick = () => api.voice.cancel();
-    const runSetup = async () => {
-      // Ohne Stimmprobe kann OuteTTS nicht sprechen: vor dem großen Download (mehrere GB) prüfen.
-      if (!draft.ttsSampleFile) {
-        VU.done = 'Bitte zuerst über „Aufnahme wählen …“ eine Stimmprobe (10–18 Sekunden, WAV) auswählen. Ohne Aufnahme kann „Meine Stimme“ nicht sprechen.';
-        render();
-        return;
-      }
-      VU.running = true; VU.done = ''; VU.text = 'Starte …'; VU.pct = 0;
-      await api.settings.set({ ttsSampleFile: draft.ttsSampleFile });
-      render();
-      const r = await api.voice.setup();
-      VU.running = false;
-      const f = (x) => Number(x).toFixed(1).replace('.', ',');
-      if (r.settings) Object.assign(draft, { ttsEngine: r.settings.ttsEngine, ttsServerUrl: r.settings.ttsServerUrl, ttsServerDir: r.settings.ttsServerDir, ttsServerCmd: r.settings.ttsServerCmd, ttsServerAuto: r.settings.ttsServerAuto, ttsServerModel: r.settings.ttsServerModel, ttsServerLangs: r.settings.ttsServerLangs });
-      if (r.ok) VU.done = `Fertig (${r.device}). Erster Testsatz: ${f(r.cold)} s, zweiter: ${f(r.seconds)} s. Klick unten auf „Speichern“.`;
-      else VU.done = 'Fehler: ' + r.error + ' Es spricht die Windows-Stimme.';
-      render();
-    };
-    bOute.onclick = runSetup;
-    const vrow = el('div', 'chips-row'); vrow.append(bSample, bOute, bCancel);
-    vc.append(sInfo, vrow, bar, pt);
-    if (vstat.oldFiles) {
-      const bOld = el('button', 'btn small', 'Alte Dateien löschen (Chatterbox, Grafikkarte)');
-      bOld.onclick = async () => { await api.voice.cleanOld(); VU.done = 'Alte Dateien gelöscht.'; render(); };
-      vc.appendChild(el('div', 'note', 'Von früheren Versionen liegen noch mehrere GB Reste auf dem PC.'));
-      vc.appendChild(bOld);
-    }
-    vc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px';
-    if (!isMac) body.appendChild(vc);
+  function speech(body, st, vstat) {
+    hero(body, 'wave', '#ff375f', 'Sprache', 'Diktieren und Vorlesen. Alles läuft lokal auf diesem Rechner, nach dem Download auch ohne Internet.');
+    const vx = st.voxtral || {};
+    const ph = st.phonon || { voices: [], langs: [] };
 
-    const test = el('button', 'btn small', 'Stimme testen');
-    test.onclick = () => ctx.speakSample('Hallo! Das ist meine Stimme. Ich lese Dir Antworten und Texte vor.', draft);
-    const stopT = el('button', 'btn small', 'Stopp');
-    stopT.onclick = () => ctx.stopSpeaking();
-    const tr = el('div', 'chips-row'); tr.append(test, stopT);
-    body.appendChild(tr);
+    // ----- Spracheingabe (Voxtral) -----
+    const inp = section(body, 'Spracheingabe');
+    const vxRow = row(inp, 'Voxtral Mini 4B Realtime', `${vx.approx || '3,6 GB'} · Apache 2.0 · 13 Sprachen, erkennt die Sprache selbst${isMac ? ' · belegt beim Diktieren etwa 4 GB Arbeitsspeicher' : ''}`);
+    const vxCtl = vxRow.querySelector('.ap-ctl');
+    const runVx = async () => {
+      VX.running = true; VX.done = 'Wird geladen … (setzt einen abgebrochenen Download fort)'; render();
+      const r = await api.voxtral.setup();
+      VX.running = false; ctx.hideProgress();
+      VX.done = r.ok ? `Fertig. Voxtral ist bereit (Start ${sec1(r.seconds)} s).` : 'Fehler: ' + r.error;
+      render();
+    };
+    if (VX.running) vxCtl.append(el('span', 'ap-d', 'Lädt …'), btn('Abbrechen', () => api.voxtral.cancel()));
+    else if (vx.ready) vxCtl.append(okBadge('Heruntergeladen'), moreMenu([['Neu laden / prüfen', runVx], ['Entfernen', async () => { if (!confirm('Voxtral (3,6 GB) löschen? Diktieren geht dann erst nach erneutem Laden.')) return; await api.voxtral.remove(); VX.done = 'Voxtral wurde entfernt.'; render(); }, true]], 'Voxtral'));
+    else vxCtl.append(btn('Herunterladen', runVx, 'blue'));
+    if (!vx.engine) vxRow.desc('Die Engine (llama-server) fehlt in dieser Installation.');
+    if (VX.done) vxRow.desc(VX.done);
 
-    // ----- Spracherkennung (Whisper oder Voxtral) -----
-    body.appendChild(el('h3', null, 'Spracherkennung (Diktieren)'));
-    const sttEng = draft.sttEngine === 'voxtral' ? 'voxtral' : 'whisper';
-    body.appendChild(formRow('Erkennung mit', bindRender(selectOf([['whisper', 'Whisper (whisper.cpp)'], ['voxtral', 'Voxtral Realtime (Mistral, sehr schnell)']], sttEng), 'sttEngine'), 'Wird für das Diktieren und den Gesprächsmodus benutzt. Beides läuft ganz auf diesem Rechner.'));
-    if (sttEng === 'voxtral') body.appendChild(voxtralCard(st));
-    const wc = el('div', 'voice-card');
-    wc.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:6px 0 16px';
-    wc.appendChild(el('div', 'note', sttEng === 'voxtral' ? 'Mikrofon (gilt für Voxtral und Whisper):' : 'Whisper wandelt Gesprochenes in Text um. Läuft ganz auf diesem PC. Der Bildschirm bleibt dabei bedienbar.'));
-    const wmodel = draft.sttModel in st.info.whisperModels ? draft.sttModel : 'medium';
-    const names = { base: 'Schnell', small: 'Ausgewogen', medium: 'Genau' };
-    const wsel = selectOf(Object.keys(st.info.whisperModels).map((k) => [k, `${k[0].toUpperCase() + k.slice(1)} · ${names[k] || ''} (${st.info.whisperModels[k].approx})${st.whisperModels[k] ? ' – geladen' : ''}`]), wmodel);
-    wsel.addEventListener('change', () => { draft.sttModel = wsel.value; render(); });
-    const wtwo = el('div', 'two');
-    wtwo.appendChild(formRow('Modell', wsel, 'Medium ist am genauesten, besonders bei Türkisch und Dialekt.'));
-    wtwo.appendChild(formRow('Sprache beim Diktieren', bind(selectOf([['de', 'Deutsch'], ['tr', 'Türkisch'], ['auto', 'Automatisch erkennen']], draft.sttLang), 'sttLang')));
-    if (sttEng === 'whisper') wc.appendChild(wtwo);
-    const micSel = selectOf([['', 'Standard von Windows']], draft.micId || '');
-    micSel.addEventListener('change', () => { draft.micId = micSel.value; });
-    const micRow = formRow('Mikrofon', micSel, 'Wähle hier Dein Mikrofon, falls beim Diktieren nichts oder nur „Musik“ erkannt wird.');
-    const micLvl = el('div', 'note', '');
-    micRow.appendChild(micLvl);
-    const micTest = el('button', 'btn small', 'Mikrofon testen (3 Sekunden)');
-    micTest.style.marginTop = '8px';
-    micRow.appendChild(micTest);
+    const micSel = popup([['', isMac ? 'Standard des Systems' : 'Standard von Windows']], draft.micId || '', (v) => save({ micId: v }), 'Mikrofon');
+    const micTest = btn('Testen', async () => {
+      micTest.disabled = true; micRow.desc('Sprich jetzt …');
+      try {
+        const { startRecording } = await import('./audio.js');
+        const r = await startRecording({ deviceId: draft.micId });
+        setTimeout(() => r.stop(), 3000);
+        const wav = await r.done;
+        micRow.desc(r.peak < 0.006 ? 'Fast nur Stille. Falsches Mikrofon oder zu leise.' : `Signal da (Pegel ${Math.min(100, Math.round(r.peak * 400))} %). Du hörst Deine Aufnahme jetzt zur Kontrolle.`);
+        if (wav) { const au = new Audio(URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))); await au.play().catch(() => {}); }
+      } catch (e) { micRow.desc('Fehler: ' + (e.message || e)); }
+      micTest.disabled = false;
+    });
+    const micRow = row(inp, 'Mikrofon', 'Bleibt die Wellenform beim Sprechen flach, ist das falsche Mikrofon gewählt.', micSel, micTest);
     (async () => {
       try {
         const tmp = await navigator.mediaDevices.getUserMedia({ audio: true }); tmp.getTracks().forEach((t) => t.stop());
+        const sel = micSel.querySelector('select');
         const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
-        devs.forEach((d) => { const o = el('option', null, d.label || 'Mikrofon'); o.value = d.deviceId; micSel.appendChild(o); });
-        micSel.value = devs.some((d) => d.deviceId === draft.micId) ? draft.micId : '';
-      } catch (e) { micLvl.textContent = 'Kein Zugriff auf das Mikrofon: ' + (e.message || e); }
+        devs.forEach((d) => { const o = el('option', null, d.label || 'Mikrofon'); o.value = d.deviceId; sel.appendChild(o); });
+        sel.value = devs.some((d) => d.deviceId === draft.micId) ? draft.micId : '';
+      } catch (e) { micRow.desc('Kein Zugriff auf das Mikrofon: ' + (e.message || e)); }
     })();
-    micTest.onclick = async () => {
-      micTest.disabled = true; micLvl.textContent = 'Sprich jetzt …';
-      try {
-        const { startRecording } = await import('./audio.js');
-        const r = await startRecording({ deviceId: micSel.value });
-        setTimeout(() => r.stop(), 3000);
-        const wav = await r.done;
-        micLvl.textContent = r.peak < 0.006 ? 'Fast nur Stille. Falsches Mikrofon oder zu leise.' : `Signal da (Pegel ${Math.min(100, Math.round(r.peak * 400))} %). Du hörst Deine Aufnahme jetzt zur Kontrolle.`;
-        if (wav) { const au = new Audio(URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))); await au.play().catch(() => {}); }
-      } catch (e) { micLvl.textContent = 'Fehler: ' + (e.message || e); }
-      micTest.disabled = false;
-    };
-    wc.appendChild(micRow);
-    if (sttEng === 'voxtral') { body.appendChild(wc); return speechTail(body); }
-    const ready = !!(st.whisperBinary && st.whisperModels[wmodel]);
-    const wrow = el('div', 'chips-row');
-    wrow.style.alignItems = 'center';
-    wrow.appendChild(el('span', 'badge ' + (ready ? 'ok' : 'warn'), ready ? 'bereit' : 'fehlt'));
-    const wb = el('button', 'btn small' + (ready ? '' : ' primary'), ready ? 'Neu laden' : 'Einrichten');
-    wb.onclick = async () => {
-      wb.disabled = true;
-      try { await api.speech.prepareStt(wmodel); ctx.hideProgress(); ctx.hint('Fertig: Spracherkennung (' + wmodel + ')', 5000); }
-      catch (e) { ctx.hideProgress(); ctx.hint('Spracherkennung: ' + (e.message || e), 0); }
-      render();
-    };
-    wrow.appendChild(wb);
-    wc.appendChild(wrow);
-    body.appendChild(wc);
-    speechTail(body);
-  }
+    row(inp, 'Diktierten Text sofort senden', 'Aus: Der Text erscheint zuerst im Eingabefeld.', toggle(draft.autoSend, (v) => save({ autoSend: v }), 'Diktierten Text sofort senden'));
 
-  function speechTail(body) {
-    const as = switchRow('Diktierten Text sofort senden', 'Aus: der Text erscheint zuerst im Eingabefeld.', draft.autoSend);
-    bind(as.cb, 'autoSend');
-    body.appendChild(as.row);
-    const ta = switchRow('Antworten automatisch vorlesen', 'Auch über das Lautsprecher-Symbol unter dem Eingabefeld schaltbar.', draft.ttsAuto);
-    bind(ta.cb, 'ttsAuto');
-    body.appendChild(ta.row);
-  }
+    // ----- Sprachausgabe -----
+    const out = section(body, 'Sprachausgabe');
+    row(out, 'Antworten automatisch vorlesen', 'Auch über das Plus-Menü im Eingabefeld schaltbar. Ein Druck aufs Mikrofon unterbricht das Vorlesen.', toggle(draft.ttsAuto, (v) => save({ ttsAuto: v }), 'Antworten automatisch vorlesen'));
+    const engine = !isMac && draft.ttsEngine === 'server' ? 'server' : 'phonon';
+    if (!isMac) row(out, 'Stimmen-Motor', 'Türkischen Text liest die Windows-Stimme.', popup([['phonon', 'Phonon'], ['server', 'Meine Stimme (OuteTTS)']], engine, (v) => { save({ ttsEngine: v }, true); render(); }, 'Stimmen-Motor'));
 
-  const card = () => { const c = el('div', 'voice-card'); c.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px'; return c; };
-  const sec = (x) => Number(x).toFixed(1).replace('.', ',');
-
-  // ---------- Phonon (Vorlesen) ----------
-  function phononCard(st, speedRow) {
-    const ph = st.phonon || { ready: false, voices: [], langs: [] };
-    const c = card();
-    const head = el('div', 'dl-head');
-    head.appendChild(el('h3', null, 'Phonon – mehrsprachige Sprachausgabe'));
-    head.appendChild(el('span', 'badge ' + (ph.ready ? 'ok' : ''), ph.ready ? 'Heruntergeladen' : 'Nicht geladen'));
-    c.appendChild(head);
-    c.appendChild(el('div', 'note', `gradium/phonon-40m-multilingual · ${ph.approx || '75 MB'} · Lizenz ${ph.license || 'CC BY-NC 4.0'} · spricht Deutsch, Englisch, Französisch, Spanisch, Portugiesisch. Läuft nach dem Download ganz offline auf diesem Rechner.`));
-    if (!ph.binary) c.appendChild(el('div', 'err', 'Das Phonon-Programm fehlt in dieser Installation.'));
-
-    // Hugging-Face-Token (das Modell ist geschützt: Bedingungen einmal auf Hugging Face akzeptieren)
-    const tokRow = el('div', 'inline');
-    const tok = input('password', '', { placeholder: draft.hfHasToken ? 'Token ist gespeichert (verschlüsselt)' : 'hf_…' });
-    tok.autocomplete = 'off';
-    const tokSave = el('button', 'btn small', 'Token speichern');
-    const tokDel = el('button', 'btn small', 'Entfernen');
-    tokDel.style.display = draft.hfHasToken ? '' : 'none';
-    const tokMsg = el('div', 'note', draft.hfHasToken ? 'Hugging-Face-Token ist gespeichert. Er wird nur für Downloads von Hugging Face benutzt.' : 'Für Phonon nötig: Auf huggingface.co anmelden, auf der Seite gradium/phonon-40m-multilingual die Bedingungen akzeptieren, dann unter Settings → Access Tokens ein Token (Read) erstellen und hier eintragen.');
-    tokSave.onclick = async () => {
-      tokSave.disabled = true; tokMsg.textContent = 'Prüfe Token …';
-      const r = await api.hf.setToken(tok.value);
-      tokSave.disabled = false;
-      if (r.ok) { draft.hfHasToken = !!tok.value.trim(); tok.value = ''; tokMsg.textContent = r.name ? `Gespeichert (Konto: ${r.name}).` : 'Entfernt.'; tokDel.style.display = draft.hfHasToken ? '' : 'none'; tok.placeholder = draft.hfHasToken ? 'Token ist gespeichert (verschlüsselt)' : 'hf_…'; }
-      else tokMsg.textContent = 'Fehler: ' + r.error;
-    };
-    tokDel.onclick = async () => { await api.hf.setToken(''); draft.hfHasToken = false; tokMsg.textContent = 'Token entfernt.'; tokDel.style.display = 'none'; tok.placeholder = 'hf_…'; };
-    tokRow.append(tok, tokSave, tokDel);
-    const tr = formRow('Hugging-Face-Token', tokRow); tr.appendChild(tokMsg);
-    c.appendChild(tr);
-
-    const two = el('div', 'two');
-    const langs = [['auto', 'Automatisch (Deutsch)'], ...(ph.langs || [])];
-    two.appendChild(formRow('Textsprache', bind(selectOf(langs, draft.ttsPhononLang || 'auto'), 'ttsPhononLang'), 'Bestimmt, wie Zahlen, Datum und Zeichen gelesen werden. Türkischen Text liest Supertonic.'));
-    const vsel = selectOf((ph.voices || []).map((v) => [v.key, `${v.name} (${v.lang === 'de' ? 'Deutsch' : 'Englisch'}, ${v.gender === 'w' ? 'weiblich' : 'männlich'})`]), draft.ttsPhononVoice || 'anton');
-    bind(vsel, 'ttsPhononVoice');
-    const prev = el('button', 'btn small', 'Vorschau');
-    prev.disabled = !ph.ready;
-    const prevMsg = el('span', 'note', '');
-    prev.onclick = async () => {
-      prev.disabled = true; prevMsg.textContent = 'Erzeuge …';
-      try {
-        const t0 = Date.now();
-        const wav = await api.phonon.preview({ voice: vsel.value, lang: draft.ttsPhononLang });
-        prevMsg.textContent = `(${sec((Date.now() - t0) / 1000)} s)`;
-        const { playPreview } = await import('./audio.js');
-        await playPreview(wav, draft.ttsSpeed || 1);
-      } catch (e) { prevMsg.textContent = 'Fehler: ' + String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
-      prev.disabled = false;
-    };
-    const vrow = el('div', 'inline'); vrow.append(vsel, prev, prevMsg);
-    two.appendChild(formRow('Stimme', vrow));
-    c.appendChild(two);
-    if (draft.ttsEngine === 'phonon') c.appendChild(speedRow('Wiedergabegeschwindigkeit'));
-
-    const note = el('div', 'note', PH.done || '');
-    const go = el('button', 'btn small' + (ph.ready ? '' : ' primary'), ph.ready ? 'Neu laden / reparieren' : 'Herunterladen');
-    const stop = el('button', 'btn small', 'Abbrechen');
-    const del = el('button', 'btn small danger', 'Entfernen');
-    go.disabled = PH.running || !ph.binary;
-    stop.style.display = PH.running ? '' : 'none';
-    del.style.display = ph.model && !PH.running ? '' : 'none';
-    stop.onclick = () => api.phonon.cancel();
-    del.onclick = async () => { if (!confirm('Phonon (Modell und Stimmen) löschen?')) return; const n = await api.phonon.remove(); Object.assign(draft, { ttsEngine: n.ttsEngine }); PH.done = 'Phonon wurde entfernt.'; render(); };
-    go.onclick = async () => {
-      if (!draft.hfHasToken && !confirm('Es ist noch kein Hugging-Face-Token gespeichert. Phonon ist geschützt und lässt sich ohne Token meist nicht laden. Trotzdem versuchen?')) return;
-      PH.running = true; PH.done = 'Wird geladen …';
-      await api.settings.set({ ttsPhononVoice: vsel.value });
-      render();
+    const phRow = row(out, 'Phonon – mehrsprachige Sprachausgabe', `${ph.approx || '75 MB'} · CC BY-NC 4.0 · Deutsch, Englisch, Französisch, Spanisch, Portugiesisch`);
+    const phCtl = phRow.querySelector('.ap-ctl');
+    const runPh = async () => {
+      if (!draft.hfHasToken && !confirm('Es ist noch kein Hugging-Face-Token gespeichert (unten bei „Downloads“). Phonon ist geschützt und lässt sich ohne Token meist nicht laden. Trotzdem versuchen?')) return;
+      PH.running = true; PH.done = ''; render();
       const r = await api.phonon.setup();
-      PH.running = false;
-      ctx.hideProgress();
-      if (r.ok) { Object.assign(draft, { ttsEngine: 'phonon' }); PH.done = `Fertig. Erster Testsatz: ${sec(r.seconds)} s. Phonon ist jetzt der Stimmen-Motor.`; }
-      else PH.done = 'Fehler: ' + r.error;
+      PH.running = false; ctx.hideProgress();
+      PH.done = r.ok ? `Fertig. Erster Testsatz: ${sec1(r.seconds)} s.` : 'Fehler: ' + r.error;
+      if (r.ok) save({ ttsEngine: 'phonon' }, true);
       render();
     };
-    const row = el('div', 'chips-row'); row.append(go, stop, del);
-    c.append(row, note);
-    return c;
-  }
+    if (PH.running) phCtl.append(el('span', 'ap-d', 'Lädt …'), btn('Abbrechen', () => api.phonon.cancel()));
+    else if (ph.ready) phCtl.append(okBadge('Heruntergeladen'), moreMenu([['Neu laden / reparieren', runPh], ['Entfernen', async () => { if (!confirm('Phonon (Modell und Stimmen) löschen?')) return; await api.phonon.remove(); PH.done = 'Phonon wurde entfernt.'; render(); }, true]], 'Phonon'));
+    else phCtl.append(btn('Herunterladen', runPh, 'blue'));
+    if (!ph.binary) phRow.desc('Das Phonon-Programm fehlt in dieser Installation.');
+    if (PH.done) phRow.desc(PH.done);
 
-  // ---------- Voxtral (Diktieren) ----------
-  function voxtralCard(st) {
-    const vx = st.voxtral || { ready: false };
-    const c = card();
-    const head = el('div', 'dl-head');
-    head.appendChild(el('h3', null, 'Voxtral Mini 4B Realtime'));
-    head.appendChild(el('span', 'badge ' + (vx.ready ? 'ok' : 'warn'), vx.ready ? 'Heruntergeladen' : 'Nicht geladen'));
-    c.appendChild(head);
-    const isMac = /Mac/i.test(navigator.platform);
-    c.appendChild(el('div', 'note', `mistralai/Voxtral-Mini-4B-Realtime-2602 · ${vx.approx || '3,6 GB'} (GGUF Q4_K_M) · Lizenz Apache 2.0 · 13 Sprachen, erkennt die Sprache selbst. Läuft in der eingebauten Engine auf der Grafikkarte (${isMac ? 'Metal' : 'Vulkan'}), ganz offline.`));
-    if (isMac) c.appendChild(el('div', 'note', 'Hinweis Mac: Voxtral belegt beim Diktieren etwa 4 GB vom gemeinsamen Arbeitsspeicher. Bei 16 GB passt daneben ein Chatmodell bis etwa 8 GB gut; bei größeren Modellen wird es eng.'));
-    if (!vx.engine) c.appendChild(el('div', 'err', 'Die Engine (llama-server) fehlt in dieser Installation.'));
-    const note = el('div', 'note', VX.done || '');
-    const go = el('button', 'btn small' + (vx.ready ? '' : ' primary'), vx.ready ? 'Neu laden / prüfen' : 'Herunterladen');
-    const stop = el('button', 'btn small', 'Abbrechen');
-    const del = el('button', 'btn small danger', 'Entfernen');
-    go.disabled = VX.running || !vx.engine;
-    stop.style.display = VX.running ? '' : 'none';
-    del.style.display = vx.ready && !VX.running ? '' : 'none';
-    stop.onclick = () => api.voxtral.cancel();
-    del.onclick = async () => { if (!confirm('Voxtral (3,6 GB) löschen? Diktiert wird dann wieder mit Whisper.')) return; const n = await api.voxtral.remove(); draft.sttEngine = n.sttEngine; VX.done = 'Voxtral wurde entfernt.'; render(); };
-    go.onclick = async () => {
-      VX.running = true; VX.done = 'Wird geladen … (setzt einen abgebrochenen Download fort)';
-      render();
-      const r = await api.voxtral.setup();
-      VX.running = false;
-      ctx.hideProgress();
-      if (r.ok) { draft.sttEngine = 'voxtral'; VX.done = `Fertig. Voxtral ist gestartet (${sec(r.seconds)} s) und diktiert ab jetzt. Klick unten auf „Speichern“.`; }
-      else VX.done = 'Fehler: ' + r.error;
-      render();
+    if (engine === 'phonon') {
+      row(out, 'Textsprache', 'Wird verwendet, um Zahlen und Datumsangaben vor der Sprachausgabe aufzubereiten.', popup([['auto', 'Deutsch'], ...(ph.langs || []).filter(([k]) => k !== 'de')], draft.ttsPhononLang || 'auto', (v) => save({ ttsPhononLang: v }), 'Textsprache'));
+      const vsel = popup((ph.voices || []).map((v) => [v.key, v.name]), draft.ttsPhononVoice || 'anton', (v) => save({ ttsPhononVoice: v }), 'Stimme');
+      const prev = btn('Vorschau', null);
+      prev.insertAdjacentHTML('afterbegin', icon('speaker', 13));
+      prev.disabled = !ph.ready;
+      prev.onclick = async () => {
+        prev.disabled = true;
+        try {
+          const wav = await api.phonon.preview({ voice: draft.ttsPhononVoice || 'anton', lang: draft.ttsPhononLang });
+          const { playPreview } = await import('./audio.js');
+          await playPreview(wav, draft.ttsSpeed || 1);
+        } catch (e) { ctx.hint('Vorschau: ' + cleanErr(e), 0); }
+        prev.disabled = false;
+      };
+      row(out, 'Stimme', null, vsel, prev);
+    } else {
+      // „Meine Stimme“ (OuteTTS, nur Windows)
+      const sRow = row(out, 'Stimmprobe', draft.ttsSampleFile || 'Noch keine gewählt. Eine saubere Aufnahme von 10 bis 18 Sekunden (WAV) genügt.');
+      sRow.querySelector('.ap-ctl').appendChild(btn('Aufnahme wählen …', async () => { const r = await api.speech.pickSample(); if (r) { draft.ttsSampleFile = r.name; sRow.desc(r.name); } }));
+      const oRow = row(out, 'Meine Stimme (OuteTTS)', VU.running ? VU.text : (VU.done || (vstat.installed ? 'Eingerichtet.' : 'Einmalige Einrichtung, mehrere GB Download.')));
+      oRow.querySelector('.ap-d').id = 'voiceProgText';
+      const oc = oRow.querySelector('.ap-ctl');
+      if (VU.running) oc.appendChild(btn('Abbrechen', () => api.voice.cancel()));
+      else oc.appendChild(btn(vstat.installed ? 'Neu einrichten' : 'Einrichten', async () => {
+        if (!draft.ttsSampleFile) { VU.done = 'Bitte zuerst eine Stimmprobe wählen.'; render(); return; }
+        VU.running = true; VU.done = ''; VU.text = 'Starte …'; render();
+        const r = await api.voice.setup();
+        VU.running = false;
+        VU.done = r.ok ? `Fertig (${r.device}). Testsatz: ${sec1(r.seconds)} s.` : 'Fehler: ' + r.error;
+        if (r.settings) Object.assign(draft, r.settings);
+        render();
+      }, vstat.installed ? '' : 'blue'));
+      if (vstat.oldFiles) row(out, 'Alte Dateien früherer Versionen', 'Mehrere GB Reste (Chatterbox, Grafikkarte).', btn('Löschen', async () => { await api.voice.cleanOld(); render(); }, 'red'));
+    }
+    row(out, 'Wiedergabegeschwindigkeit', null, popup([['0.75', '0,75×'], ['1', '1×'], ['1.25', '1,25×'], ['1.5', '1,5×']], String(draft.ttsSpeed || 1), (v) => save({ ttsSpeed: Number(v) }), 'Wiedergabegeschwindigkeit'));
+
+    // ----- Downloads (Hugging-Face-Token) -----
+    const dl = section(body, 'Downloads');
+    const tRow = row(dl, 'Hugging-Face-Token', 'Verschlüsselt gespeichert, nur für Downloads (z. B. Phonon).');
+    const drawTok = (editing, msg) => {
+      const c = tRow.querySelector('.ap-ctl'); c.innerHTML = '';
+      if (msg) tRow.desc(msg);
+      if (draft.hfHasToken && !editing) {
+        c.append(okBadge('Gespeichert'), btn('Ändern …', () => drawTok(true)), moreMenu([['Token entfernen', async () => { await api.hf.setToken(''); draft.hfHasToken = false; drawTok(false, 'Token entfernt.'); }, true]], 'Token'));
+        return;
+      }
+      const f = field('', { type: 'password', placeholder: 'hf_…', width: '220px' });
+      f.autocomplete = 'off';
+      c.append(f, btn('Speichern', async () => {
+        const r = await api.hf.setToken(f.value);
+        if (r.ok) { draft.hfHasToken = !!f.value.trim(); drawTok(false, r.name ? `Gespeichert (Konto: ${r.name}).` : 'Entfernt.'); }
+        else tRow.desc('Fehler: ' + r.error);
+      }, 'blue'));
     };
-    const row = el('div', 'chips-row'); row.append(go, stop, del);
-    c.append(row, note);
-    return c;
+    drawTok(false, draft.hfHasToken ? null : 'Für Phonon nötig: auf huggingface.co die Bedingungen von gradium/phonon-40m-multilingual akzeptieren, dann unter Settings → Access Tokens ein Token vom Typ „Lesen“ erstellen.');
   }
 
-  // ---------- Daten ----------
+  // ---------- Standardwerte ----------
+  function ai(body) {
+    const sys = section(body, 'Grundanweisung an die KI', 'Gilt für jeden Chat. Die Angaben des aktiven Profils kommen automatisch dazu.');
+    const r = el('div', 'ap-row');
+    const ta = area(draft.systemPrompt, 5, (v) => save({ systemPrompt: v }));
+    ta.classList.add('bare');
+    ta.setAttribute('aria-label', 'Grundanweisung an die KI');
+    r.appendChild(ta);
+    sys.appendChild(r);
+
+    const a = section(body, 'Antworten');
+    const ctxOpts = [4096, 8192, 16384, 32768, 65536, 131072];
+    const cur = parseInt(draft.numCtx, 10) || 16384;
+    row(a, 'Kontextlänge', 'Mehr = längere PDFs, aber langsamer.', popup((ctxOpts.includes(cur) ? ctxOpts : [...ctxOpts, cur].sort((x, y) => x - y)).map((n) => [String(n), n.toLocaleString('de-DE') + ' Tokens']), String(cur), (v) => save({ numCtx: parseInt(v, 10) }), 'Kontextlänge'));
+    const tr = el('span', 'ap-range');
+    const sl = el('input'); sl.type = 'range'; sl.min = 0; sl.max = 2; sl.step = 0.1; sl.value = draft.temperature; sl.setAttribute('aria-label', 'Kreativität');
+    sl.oninput = () => save({ temperature: Number(sl.value) });
+    tr.append(el('span', 'ap-d', 'Sachlich'), sl, el('span', 'ap-d', 'Kreativ'));
+    row(a, 'Kreativität', null, tr);
+    const seg = el('span', 'ap-seg');
+    seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', 'Standard-Denktiefe');
+    for (const [v, t] of [['low', 'Niedrig'], ['medium', 'Mittel'], ['high', 'Hoch']]) {
+      const b = el('button', draft.think === v ? 'on' : '', t);
+      b.type = 'button'; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(draft.think === v));
+      b.onclick = () => { save({ think: v }); seg.querySelectorAll('button').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }); };
+      seg.appendChild(b);
+    }
+    row(a, 'Standard-Denktiefe', 'Bei Modellen mit Denken. Im Chat jederzeit änderbar.', seg);
+    row(a, 'Modell im Speicher halten', 'Danach wird es entladen und beim nächsten Chat neu geladen.', popup([['5m', '5 Minuten'], ['30m', '30 Minuten'], ['2h', '2 Stunden'], ['-1', 'Immer']], draft.keepAlive, (v) => save({ keepAlive: v }), 'Modell im Speicher halten'));
+
+    if (!isMac) {
+      const hw = section(body, 'Dein Rechner', 'Für „Passt auf Deine Karte“ in Erkunden.');
+      row(hw, 'Grafikspeicher', null, field(draft.vramGb, { type: 'number', width: '72px', onInput: (v) => save({ vramGb: Math.max(2, parseInt(v, 10) || 16) }) }), el('span', 'ap-d', 'GB'));
+      row(hw, 'Arbeitsspeicher', null, field(draft.ramGb, { type: 'number', width: '72px', onInput: (v) => save({ ramGb: Math.max(4, parseInt(v, 10) || 32) }) }), el('span', 'ap-d', 'GB'));
+    }
+  }
+
+  // ---------- Daten und Info ----------
   function data(body) {
-    body.appendChild(el('h2', null, 'Daten und Info'));
-    body.appendChild(el('div', 'note', 'Alle Chats, Einstellungen und Profile liegen nur auf diesem PC.'));
-    const open = el('button', 'btn', 'Datenordner öffnen');
-    open.onclick = () => api.app.openDataDir();
-    const clr = el('button', 'btn danger', 'Alle Chats löschen');
-    clr.onclick = async () => {
+    const h = el('div', 'ap-box ap-hero');
+    const logo = el('img', 'ap-logo'); logo.src = 'logo.svg'; logo.alt = '';
+    h.append(logo, el('div', 'ap-hero-t', 'FA KI Desktop'), el('div', 'ap-d', `Version ${info.version}`), el('div', 'ap-d', 'Alle Chats, Einstellungen und Profile liegen nur auf diesem Rechner.'));
+    body.appendChild(h);
+    const d = section(body, 'Daten');
+    const dr = row(d, 'Datenordner', info.dataDir, btn(isMac ? 'Im Finder zeigen' : 'Im Explorer zeigen', () => api.app.openDataDir()));
+    dr.querySelector('.ap-d').classList.add('mono');
+    row(d, 'Alle Chats löschen', 'Entfernt alle Chats endgültig. Einstellungen und Modelle bleiben.', btn('Alle löschen …', async () => {
       if (!confirm('Wirklich ALLE Chats endgültig löschen?')) return;
       const n = await api.chats.clear();
       ctx.onChatsCleared();
       ctx.hint(`${n} Chats gelöscht.`);
-    };
-    const row = el('div', 'chips-row'); row.style.margin = '14px 0'; row.append(open, clr);
-    body.appendChild(row);
-    body.appendChild(el('h3', null, 'Info'));
-    body.appendChild(el('div', null, `FA KI Desktop, Version ${info.version}`));
-    body.appendChild(el('div', 'note', info.dataDir));
+    }, 'red'));
   }
 
   await render();

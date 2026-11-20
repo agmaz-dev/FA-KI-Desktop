@@ -30,7 +30,7 @@ async function blobToWav16k(blob) {
   src.start();
   const rendered = await off.startRendering();
   const data = rendered.getChannelData(0);
-  // Leise Aufnahmen anheben: Whisper erkennt sonst nur Stille („[Musik]“).
+  // Leise Aufnahmen anheben: die Erkennung hört sonst nur Stille („[Musik]“).
   let peak = 0;
   for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
   lastWavPeak = peak;
@@ -42,8 +42,11 @@ async function blobToWav16k(blob) {
  * Startet eine Aufnahme. Mit vad=true endet sie automatisch nach einer Sprechpause.
  * Gibt { stop(), cancel(), done } zurück; done liefert WAV-Bytes (16 kHz, mono) oder null (nichts gesprochen).
  */
-export async function startRecording({ vad = false, onLevel, deviceId = '' } = {}) {
-  // Rauschunterdrückung und Echo-Filter von Chromium verschlucken bei manchen Mikrofonen die Sprache (dann hört Whisper nur „[Musik]“).
+/**
+ * onPcm(bytes): bekommt laufend PCM16-Daten (16 kHz, mono) für die Live-Erkennung (Voxtral), etwa alle 0,25 s.
+ */
+export async function startRecording({ vad = false, onLevel, onPcm, deviceId = '' } = {}) {
+  // Rauschunterdrückung und Echo-Filter von Chromium verschlucken bei manchen Mikrofonen die Sprache (dann hört die Erkennung nur „[Musik]“).
   const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 };
   if (deviceId) audio.deviceId = { exact: deviceId };
   let stream;
@@ -57,8 +60,42 @@ export async function startRecording({ vad = false, onLevel, deviceId = '' } = {
   try { await ac.resume(); } catch { /* egal */ } // ohne resume() liefert die Pegelmessung evtl. nur Nullen
   const an = ac.createAnalyser();
   an.fftSize = 1024;
-  ac.createMediaStreamSource(stream).connect(an);
+  const src = ac.createMediaStreamSource(stream);
+  src.connect(an);
   const buf = new Float32Array(an.fftSize);
+  // Live-Daten: auf 16 kHz herunterrechnen, leise Stimmen behutsam anheben (sonst hört die Erkennung nur Stille)
+  let proc = null;
+  if (onPcm) {
+    proc = ac.createScriptProcessor(4096, 1, 1);
+    const mute = ac.createGain(); mute.gain.value = 0;
+    src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
+    const ratio = ac.sampleRate / 16000;
+    let carry = 0;
+    let peak = 0.0001;
+    let pending = [];
+    let pendingLen = 0;
+    proc.onaudioprocess = (e) => {
+      if (cancelled) return;
+      const x = e.inputBuffer.getChannelData(0);
+      for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a; }
+      const gain = peak > 0.002 ? Math.min(12, 0.6 / peak) : 1;
+      const out = new Int16Array(Math.floor((x.length - carry) / ratio) + 1);
+      let n = 0;
+      let pos = carry;
+      for (; pos < x.length; pos += ratio) {
+        const v = Math.max(-1, Math.min(1, x[Math.floor(pos)] * gain));
+        out[n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+      }
+      carry = pos - x.length;
+      pending.push(out.subarray(0, n)); pendingLen += n;
+      if (pendingLen >= 4000) {
+        const all = new Int16Array(pendingLen);
+        let o = 0; for (const p of pending) { all.set(p, o); o += p.length; }
+        pending = []; pendingLen = 0;
+        onPcm(new Uint8Array(all.buffer));
+      }
+    };
+  }
 
   let spoke = false;
   let lastVoice = Date.now();
@@ -81,10 +118,11 @@ export async function startRecording({ vad = false, onLevel, deviceId = '' } = {
       else if (!spoke && now - started > 9000) { cancelled = true; stop(); }
       else if (now - started > 120000) stop();
     }
-  }, 100);
+  }, 50);
 
   rec.onstop = async () => {
     clearInterval(timer);
+    if (proc) { try { proc.disconnect(); proc.onaudioprocess = null; } catch { /* egal */ } }
     stream.getTracks().forEach((t) => t.stop());
     ac.close().catch(() => {});
     if (cancelled || (vad && !spoke) || !chunks.length) return finish(null);
@@ -189,7 +227,7 @@ export async function playPreview(bytes, rate = 1, onState) {
 
 /**
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
- * Nutzt Supertonic bzw. „Meine Stimme“ (lokal), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
+ * Nutzt Phonon bzw. „Meine Stimme“ (lokal), sonst die System-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
 /** Schneidet den ersten Satz an einem Komma kurz, damit die Stimme früher anfängt. */
 function shortFirst(sentences) {
@@ -202,7 +240,7 @@ function shortFirst(sentences) {
   return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
 }
 
-export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'supertonic', onState, onWarn } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speed = 1, engine = 'phonon', onState, onWarn } = {}) {
   // Phonon erzeugt immer im normalen Tempo, die Geschwindigkeit gilt beim Abspielen.
   const playRate = engine === 'phonon' ? speed : 1;
   const synthSpeed = engine === 'phonon' ? 1 : speed;
@@ -213,7 +251,8 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const serverMode = (engine === 'server' || engine === 'supertonic' || engine === 'phonon') && voicePref !== 'windows';
+  // Türkisch kann Phonon nicht: das liest die System-Stimme.
+  const serverMode = (engine === 'server' || engine === 'phonon') && voicePref !== 'windows' && lang !== 'tr';
   const useSrv = serverMode;
   let warned = false;
   const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed: synthSpeed });

@@ -51,7 +51,8 @@ function applyAppearance(s) {
   document.documentElement.style.setProperty('--fs', (s.fontSize || 16) + 'px');
   const stack = (name, fallback) => { const n = String(name || '').replace(/["';{}<>\\]/g, '').trim(); return n ? `"${n}", ${fallback}` : fallback; };
   const root = document.documentElement.style;
-  root.setProperty('--font-sans', stack(s.fontUi, 'system-ui, sans-serif'));
+  root.setProperty('--font-sans', stack(s.fontUi, '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif'));
+  document.documentElement.classList.toggle('no-tokens', s.showTokens === false);
   root.setProperty('--font-answer', stack(s.fontAnswer, 'Georgia, serif'));
 }
 
@@ -372,7 +373,7 @@ function renderAll() {
 }
 function makeEmpty() {
   const d = el('div', 'empty'); d.id = 'empty';
-  d.innerHTML = '<div class="logo big">FA</div><h1 id="greeting"></h1><p>Alles läuft lokal auf diesem PC.</p>';
+  d.innerHTML = '<img class="logo-img big" src="logo.svg" alt=""><h1 id="greeting"></h1><p>Alles läuft lokal auf diesem Rechner.</p>';
   return d;
 }
 
@@ -593,7 +594,7 @@ async function runAssistant() {
     options: { num_ctx: state.settings.numCtx, temperature: state.settings.temperature },
   };
   if (think !== undefined) body.think = think;
-  const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false || state.settings.agentTools !== false);
+  const useTools = caps.includes('tools');
   api.chat.start({ id, chatId: state.chat.id, body, useTools });
   api.chats.save(state.chat);
 }
@@ -660,21 +661,19 @@ api.chat.onError(({ id, error }) => finishStream(id, { error }));
 async function speakNow(text, settingsOverride) {
   const s = settingsOverride || state.settings;
   try {
-    state.speechStatus = await api.speech.status();
     await speak(text, {
-      voicePref: s.ttsVoice,
-      speechStatus: state.speechStatus,
+      voicePref: 'auto',
       speed: s.ttsSpeed || 1,
-      engine: s.ttsEngine === 'server' || s.ttsEngine === 'phonon' ? s.ttsEngine : 'supertonic',
-      onWarn: (m) => hint(({ supertonic: 'Supertonic', phonon: 'Phonon', server: 'Meine Stimme (OuteTTS)' }[s.ttsEngine] || 'Die Stimme') + ' ist gerade nicht bereit, es spricht die System-Stimme: ' + m, 0),
-      onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
+      engine: s.ttsEngine === 'server' ? 'server' : 'phonon',
+      onWarn: (m) => hint((s.ttsEngine === 'server' ? 'Meine Stimme (OuteTTS)' : 'Phonon') + ' ist gerade nicht bereit, es spricht die System-Stimme: ' + m, 0),
+      onState: (on) => { state.speaking = on; renderMic(); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
 }
 function stopAllSpeech() {
   stopSpeaking();
   state.speaking = false;
-  $('btnStopSpeak').classList.add('hidden');
+  renderMic();
 }
 
 function renderTtsButton() {
@@ -684,72 +683,108 @@ function renderTtsButton() {
   $('ttsLabel').textContent = state.settings.ttsAuto ? 'Automatisches Vorlesen ist an (Klick: aus)' : 'Antworten automatisch vorlesen';
 }
 
-// ---------- Mikrofon ----------
+// ---------- Mikrofon: ein Knopf für alles ----------
+// Liest die KI vor: Klick stoppt das Vorlesen sofort und hört zu. Hört die App zu: Klick beendet die Aufnahme.
+function renderMic() {
+  const b = $('btnMic');
+  const recOn = !!state.rec;
+  b.classList.toggle('rec', recOn);
+  b.classList.toggle('speaking', !recOn && !!state.speaking);
+  b.innerHTML = icon(recOn ? 'stop' : state.speaking ? 'speaker' : 'mic', 17);
+  b.title = recOn ? 'Aufnahme beenden' : state.speaking ? 'Vorlesen unterbrechen und zuhören' : 'Diktieren';
+  b.setAttribute('aria-label', b.title);
+  $('composer').classList.toggle('dictating', recOn);
+  $('wave').classList.toggle('hidden', !recOn);
+}
+
+// Wellenform nach der echten Stimme: neue Balken kommen rechts dazu und wandern nach links
+const WAVE_N = 26;
+let waveLevels = [];
+function waveReset() {
+  waveLevels = new Array(WAVE_N).fill(0);
+  const w = $('wave');
+  w.innerHTML = '';
+  for (let i = 0; i < WAVE_N; i++) w.appendChild(document.createElement('i'));
+}
+function wavePush(rms) {
+  waveLevels.push(Math.min(1, Math.sqrt(rms) * 3.2));
+  waveLevels.shift();
+  const bars = $('wave').children;
+  for (let i = 0; i < bars.length; i++) bars[i].style.height = Math.max(3, Math.round(waveLevels[i] * 24)) + 'px';
+}
+
 async function ensureStt() {
   const st = await api.speech.status();
-  if (state.settings.sttEngine === 'voxtral') {
-    if (st.voxtral && st.voxtral.ready) return true;
-    if (!confirm(`Zum Diktieren ist Voxtral gewählt. Dafür wird einmalig das Modell geladen (ca. ${(st.voxtral && st.voxtral.approx) || '3,6 GB'}). Jetzt laden?`)) return false;
-    showProgress('Voxtral wird geladen', null);
-    const r = await api.voxtral.setup();
-    hideProgress();
-    if (!r.ok) { hint('Voxtral konnte nicht eingerichtet werden: ' + r.error, 0); return false; }
-    return true;
-  }
-  const model = state.settings.sttModel;
-  if (st.whisperBinary && st.whisperModels[model]) return true;
-  if (!confirm(`Für die Spracheingabe muss einmalig ein lokales Spracherkennungs-Modell geladen werden (ca. ${st.info.whisperModels[model].approx}). Jetzt laden?`)) return false;
-  try {
-    showProgress('Spracherkennung wird eingerichtet', null);
-    await api.speech.prepareStt(model);
-    hideProgress();
-    return true;
-  } catch (e) {
-    hideProgress();
-    hint('Spracherkennung konnte nicht eingerichtet werden: ' + (e.message || e), 0);
-    return false;
-  }
+  if (st.voxtral && st.voxtral.ready) return true;
+  if (!confirm(`Zum Diktieren wird einmalig Voxtral geladen (ca. ${(st.voxtral && st.voxtral.approx) || '3,6 GB'}). Jetzt laden?`)) return false;
+  showProgress('Voxtral wird geladen', null);
+  const r = await api.voxtral.setup();
+  hideProgress();
+  if (!r.ok) { hint('Voxtral konnte nicht eingerichtet werden: ' + r.error, 0); return false; }
+  return true;
 }
 
 async function transcribeWav(wav) {
   if (!wav) { hint('Es wurde nichts gesprochen.'); return ''; }
   showProgress('Sprache wird erkannt', null);
-  try { return await api.speech.transcribe({ wav, lang: state.settings.sttLang, model: state.settings.sttModel }); }
+  try { return await api.speech.transcribe({ wav }); }
   catch (e) { hint('Erkennung fehlgeschlagen: ' + (e.message || e), 0); return ''; }
   finally { hideProgress(); }
 }
 
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
+  // Im Gesprächsmodus: Klick während des Vorlesens unterbricht die KI, dann sofort zuhören
+  if (state.conv) { stopAllSpeech(); convListen(); return; }
+  stopAllSpeech();
   if (!(await ensureStt())) return;
-  api.speech.warmStt(state.settings.sttModel).catch(() => {}); // Modell lädt, während gesprochen wird
-  try { stopAllSpeech(); state.rec = await startRecording({ vad: false, deviceId: state.settings.micId }); }
-  catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
-  $('btnMic').classList.add('rec');
-  hint('Aufnahme läuft … nochmal auf das Mikrofon klicken zum Beenden.', 0);
+  const base = $('input').value;
+  const join = (t) => (base && t ? base.replace(/\s+$/, '') + ' ' : base) + (t || '');
+  // Live-Erkennung: Text erscheint schon während des Sprechens
+  const live = await api.stt.start().catch(() => ({ ok: false }));
+  const offDelta = live.ok ? api.stt.onDelta(({ text }) => { $('input').value = join(text); autosize(); }) : () => {};
+  waveReset();
+  try {
+    state.rec = await startRecording({ vad: false, deviceId: state.settings.micId, onLevel: wavePush, onPcm: live.ok ? (b) => api.stt.push(b) : null });
+  } catch (e) {
+    offDelta(); if (live.ok) api.stt.cancel();
+    return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0);
+  }
+  renderMic();
   const recH = state.rec;
   const wav = await recH.done;
   state.rec = null;
-  $('btnMic').classList.remove('rec');
-  hint('');
-  if (wav && recH.peak < 0.006) return hint('Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon und prüfe die Lautstärke in Windows.', 0);
-  const t = await transcribeWav(wav);
-  if (t) {
-    const cur = $('input').value;
-    $('input').value = (cur ? cur + ' ' : '') + t;
-    autosize();
-    if (state.settings.autoSend) send();
+  renderMic();
+  let t = '';
+  if (live.ok) {
+    showProgress('Letzte Wörter werden erkannt', null);
+    try { t = await api.stt.finish(); } catch { t = ''; }
+    hideProgress();
+    offDelta();
+    if (!t && wav) t = await transcribeWav(wav); // Rückfall: ganze Aufnahme auf einmal
+  } else {
+    if (wav && recH.peak < 0.006) return hint('Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon.', 0);
+    t = await transcribeWav(wav);
   }
+  $('input').value = join(t);
+  autosize();
+  if (!t && recH.peak < 0.006) hint('Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon.', 0);
+  if (t && state.settings.autoSend) send();
 }
 
 async function convListen() {
-  if (!state.conv || state.rec || state.streaming) return;
-  api.speech.warmStt(state.settings.sttModel).catch(() => {});
-  try { state.rec = await startRecording({ vad: true, deviceId: state.settings.micId }); }
-  catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  // „listening“ wird sofort gesetzt: sonst könnten Mikrofon-Klick und Ende des Vorlesens zwei Aufnahmen starten
+  if (!state.conv || state.rec || state.listening || state.streaming) return;
+  state.listening = true;
+  waveReset();
+  try { state.rec = await startRecording({ vad: true, deviceId: state.settings.micId, onLevel: wavePush }); }
+  catch (e) { state.listening = false; state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  renderMic();
   hint('Ich höre zu … sprich einfach.', 0);
   const wav = await state.rec.done;
   state.rec = null;
+  state.listening = false;
+  renderMic();
   if (!state.conv) return;
   if (!wav) return convListen();
   hint('');
@@ -767,6 +802,7 @@ async function toggleConv() {
     return;
   }
   if (!(await ensureStt())) return;
+  api.speech.warmStt().catch(() => {});
   state.conv = true;
   $('btnConv').classList.add('rec');
   convListen();
@@ -1065,7 +1101,6 @@ function wire() {
   $('btnMic').onclick = toggleMic;
   $('btnConv').onclick = toggleConv;
   $('btnExport').onclick = exportChat;
-  $('btnStopSpeak').onclick = stopAllSpeech;
   $('btnSidebar').onclick = () => toggleSidebar(false);
   $('btnSidebarOpen').onclick = () => toggleSidebar(true);
   $('chatSearch').oninput = (e) => { state.search = e.target.value; refreshChats(); };
@@ -1115,11 +1150,16 @@ function wire() {
 
 async function init() {
   state.settings = await api.settings.get();
+  api.app.info().then((i) => {
+    document.documentElement.classList.toggle('glass', !!i.glass);
+    document.documentElement.classList.toggle('mac', i.platform === 'darwin');
+  }).catch(() => {});
   applyAppearance(state.settings);
   applyIcons();
   buildTemplateMenu();
   renderProfileSelect();
   renderTtsButton();
+  renderMic();
   if (state.settings.sidebarOpen === false) toggleSidebar(false);
   wire();
   api.app.onTtsStart((r) => { if (r && r.started) hint('Stimmen-Server wurde gestartet.'); else if (r && !r.ok) hint('Stimmen-Server: ' + (r.error || 'nicht gestartet'), 0); });

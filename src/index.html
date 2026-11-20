@@ -10,10 +10,12 @@
 <div id="app">
   <aside id="sidebar">
     <div class="side-top">
-      <div class="brand"><span class="logo">FA</span><span class="brand-name">KI Desktop</span></div>
-      <button id="btnSidebar" class="icon-btn" data-icon="sidebar" title="Seitenleiste ausblenden"></button>
+      <div class="brand"><img class="logo-img" src="logo.svg" alt=""><span class="brand-name">FA KI Desktop</span></div>
+      <div class="side-top-btns">
+        <button id="btnSidebar" class="icon-btn" data-icon="sidebar" data-size="17" title="Seitenleiste ausblenden" aria-label="Seitenleiste ausblenden"></button>
+        <button id="newChat" class="icon-btn" data-icon="edit" data-size="17" title="Neuer Chat" aria-label="Neuer Chat"></button>
+      </div>
     </div>
-    <button id="newChat" class="nav-btn accent-text"><span data-icon="plus"></span>Neuer Chat</button>
     <div class="side-nav">
       <button id="navChats" class="nav-btn"><span data-icon="chat"></span>Chats</button>
       <button id="navModels" class="nav-btn"><span data-icon="library"></span>Modelle</button>
@@ -38,14 +40,13 @@
         <button id="btnSidebarOpen" class="icon-btn hidden" data-icon="sidebar" title="Seitenleiste einblenden"></button>
         <div id="chatTitle" class="chat-title"></div>
         <div class="spacer"></div>
-        <button id="btnStopSpeak" class="pill hidden"><span data-icon="stop" data-size="14"></span>Vorlesen stoppen</button>
         <button id="btnBrowser" class="icon-btn" data-icon="globe" title="Browser öffnen"></button>
         <button id="btnExport" class="icon-btn" data-icon="download" title="Chat exportieren"></button>
       </header>
 
       <div id="messages" class="messages">
         <div id="empty" class="empty">
-          <div class="logo big">FA</div>
+          <img class="logo-img big" src="logo.svg" alt="">
           <h1 id="greeting">Deine private KI</h1>
           <p>Alles läuft lokal auf diesem PC. Deine Chats und Dateien verlassen den Rechner nicht.</p>
         </div>
@@ -81,7 +82,8 @@
               </div>
               <select id="modelSel" class="hidden" aria-hidden="true"></select>
             </div>
-            <button id="btnMic" class="icon-btn" data-icon="mic" title="Diktieren (Klick zum Starten/Beenden)"></button>
+            <div id="wave" class="wave hidden" role="img" aria-label="Aufnahme läuft"></div>
+            <button id="btnMic" class="icon-btn mic-btn" data-icon="mic" title="Diktieren: Klick startet, nochmal Klick beendet. Unterbricht auch das Vorlesen." aria-label="Mikrofon"></button>
             <button id="btnSend" class="send" data-icon="up" title="Senden"></button>
             <button id="btnStop" class="send stop hidden" data-icon="stop" title="Antwort stoppen"></button>
           </div>

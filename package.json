@@ -1,7 +1,7 @@
 {
   "name": "fa-ki-desktop",
   "productName": "FA KI Desktop",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Deutsche Desktop-App für lokale KI mit eigener Engine: Chat, PDF-Lesen, Spracheingabe und Vorlesen",
   "main": "main.js",
   "author": "Feridun Agmaz",
@@ -10,17 +10,17 @@
   "scripts": {
     "build:renderer": "node scripts/build-renderer.mjs",
     "start": "npm run build:renderer && electron .",
-    "test": "node --test test/core.test.js test/tools.test.js test/agent.test.js test/hf.test.js test/engine.test.js test/models.test.js test/mail.test.js test/voice25.test.js",
+    "test": "node --test test/core.test.js test/tools.test.js test/agent.test.js test/hf.test.js test/engine.test.js test/models.test.js test/mail.test.js test/voice25.test.js test/mcp.test.js",
     "dist": "npm run build:renderer && electron-builder --win nsis --x64 --publish never",
     "dist:mac": "npm run build:renderer && electron-builder --mac dir --arm64 --publish never"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "adm-zip": "^0.6.1",
     "imapflow": "^2.12.1",
     "mailparser": "^3.14.5",
     "marked": "^14.1.0",
     "nodemailer": "^10.6.0",
-    "onnxruntime-node": "1.22.0",
     "tesseract.js": "5.1.1"
   },
   "devDependencies": {
@@ -29,11 +29,6 @@
     "electron-builder": "^26.0.0",
     "esbuild": "^0.25.0",
     "pdfjs-dist": "4.10.38"
-  },
-  "overrides": {
-    "onnxruntime-node": {
-      "adm-zip": "^0.6.1"
-    }
   },
   "build": {
     "appId": "de.agmaz.fakidesktop",
@@ -51,9 +46,7 @@
       "!voice-server/**/__pycache__/**",
       "!**/*.pyc",
       "build/renderer/**/*",
-      "package.json",
-      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
+      "package.json"
     ],
     "asar": false,
     "win": {
@@ -65,11 +58,8 @@
           ]
         }
       ],
-      "icon": "build-assets/icon.png",
-      "artifactName": "FA-KI-Desktop-Setup-${version}.exe",
-      "files": [
-        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
-      ]
+      "icon": "build-assets/icon.ico",
+      "artifactName": "FA-KI-Desktop-Setup-${version}.exe"
     },
     "mac": {
       "target": [
@@ -80,7 +70,7 @@
           ]
         }
       ],
-      "icon": "build-assets/icon.png",
+      "icon": "build-assets/icon.icns",
       "category": "public.app-category.productivity",
       "identity": null,
       "hardenedRuntime": false,
@@ -89,14 +79,11 @@
         "NSCameraUsageDescription": "Wird nicht benutzt."
       },
       "files": [
-        "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
-        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**",
         "!mac-bundle/**",
         "!llama-x/**",
         "!llama-dl/**",
         "!ptts-dl/**",
-        "!ptts-x/**",
-        "!wcpp/**"
+        "!ptts-x/**"
       ]
     },
     "nsis": {
@@ -104,13 +91,11 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "language": "1031",
-      "shortcutName": "FA KI Desktop"
+      "shortcutName": "FA KI Desktop",
+      "installerIcon": "build-assets/icon.ico",
+      "uninstallerIcon": "build-assets/icon.ico"
     },
     "extraResources": [
-      {
-        "from": "build-bundled/whisper",
-        "to": "whisper"
-      },
       {
         "from": "build-bundled/llama",
         "to": "llama"

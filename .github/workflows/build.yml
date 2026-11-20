@@ -18,7 +18,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      WHISPER_CPP_REF: v1.9.5 # fest angepinnt, damit der Build reproduzierbar bleibt
       LLAMA_CPP_TAG: b12530 # fertige Windows-Version (Vulkan, läuft auf AMD/NVIDIA/Intel), fest angepinnt
       PTTS_TAG: v0.7.1 # Phonon-Laufzeit (gradium-ai/xn-ptts), fest angepinnt
       GH_TOKEN: ${{ github.token }}
@@ -28,18 +27,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Spracherkennung (whisper.cpp) bauen
-        shell: bash
-        run: |
-          git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
-          cmake -S wcpp -B wcpp/build -A x64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          cmake --build wcpp/build --config Release -j 4 --target whisper-cli whisper-server
-          mkdir -p build-bundled/whisper
-          find wcpp/build -name whisper-cli.exe -exec cp {} build-bundled/whisper/ \;
-          find wcpp/build -name whisper-server.exe -exec cp {} build-bundled/whisper/ \;
-          ls -la build-bundled/whisper
-          test -f build-bundled/whisper/whisper-cli.exe
-          test -f build-bundled/whisper/whisper-server.exe
       - name: Eigene Engine (llama.cpp, Vulkan) laden
         shell: bash
         run: |
@@ -65,12 +52,6 @@ jobs:
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Prüfen, ob whisper-server im Installer liegt
-        shell: bash
-        run: |
-          ls -la dist/win-unpacked/resources/whisper
-          test -f dist/win-unpacked/resources/whisper/whisper-server.exe
-          test -f dist/win-unpacked/resources/whisper/whisper-cli.exe
       - name: Prüfen, ob llama-server im Installer liegt
         shell: bash
         run: test -f dist/win-unpacked/resources/llama/llama-server.exe
@@ -116,7 +97,6 @@ jobs:
     runs-on: macos-latest # Apple Silicon (M1)
     timeout-minutes: 60
     env:
-      WHISPER_CPP_REF: v1.9.5
       LLAMA_CPP_TAG: b12530
       PTTS_TAG: v0.7.1
       GH_TOKEN: ${{ github.token }}
@@ -135,18 +115,6 @@ jobs:
           cp "$(find ptts-x -type f -name ptts | head -1)" mac-bundle/ptts/ptts
           chmod +x mac-bundle/ptts/ptts
           echo "$PTTS_TAG" > mac-bundle/ptts/VERSION
-      - name: Spracherkennung (whisper.cpp, Metal) bauen
-        run: |
-          git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp wcpp
-          cmake -S wcpp -B wcpp/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON
-          cmake --build wcpp/build --config Release -j 4 --target whisper-cli whisper-server
-          mkdir -p mac-bundle/whisper
-          find wcpp/build -type f -name whisper-cli -exec cp {} mac-bundle/whisper/ \;
-          find wcpp/build -type f -name whisper-server -exec cp {} mac-bundle/whisper/ \;
-          chmod +x mac-bundle/whisper/*
-          ls -la mac-bundle/whisper
-          test -x mac-bundle/whisper/whisper-cli
-          test -x mac-bundle/whisper/whisper-server
       - name: Eigene Engine (llama.cpp, Metal) laden
         run: |
           mkdir -p llama-dl llama-x mac-bundle/llama
@@ -178,12 +146,10 @@ jobs:
           APP="$(ls -d dist/mac-arm64/*.app | head -1)"
           echo "App: $APP"
           mkdir -p "$APP/Contents/Resources"
-          rm -rf "$APP/Contents/Resources/llama" "$APP/Contents/Resources/whisper" "$APP/Contents/Resources/ptts"
+          rm -rf "$APP/Contents/Resources/llama" "$APP/Contents/Resources/ptts"
           cp -a mac-bundle/llama "$APP/Contents/Resources/llama"
-          cp -a mac-bundle/whisper "$APP/Contents/Resources/whisper"
           cp -a mac-bundle/ptts "$APP/Contents/Resources/ptts"
           test -x "$APP/Contents/Resources/llama/llama-server"
-          test -x "$APP/Contents/Resources/whisper/whisper-server"
           test -x "$APP/Contents/Resources/ptts/ptts"
           # Lose Programme und Bibliotheken zuerst, dann das ganze Programm (ad-hoc, "-").
           find "$APP/Contents/Resources" -type f \( -name "*.dylib" -o -name "*.node" -o -perm +111 \) -print0 | while IFS= read -r -d '' f; do

@@ -7,14 +7,15 @@ const { Engine, findServerExe } = require('./lib/engine');
 const { ModelStore, findOllamaModels, importOllamaModel } = require('./lib/modelstore');
 const { downloadModel } = require('./lib/download');
 const { DownloadQueue } = require('./lib/dlqueue');
-const { SpeechManager, VOICES } = require('./lib/speech');
+const { SpeechManager } = require('./lib/speech');
 const { downloadFile } = require('./lib/downloader');
 const { Procs } = require('./lib/procs');
 const { renderPdf, buildDocx } = require('./lib/export');
 const { VoiceInstaller } = require('./lib/voiceinstall');
-const { Supertonic } = require('./lib/supertonic');
 const { Phonon } = require('./lib/phonon');
 const { Voxtral } = require('./lib/voxtral');
+const { McpManager } = require('./lib/mcp');
+const { GDrive } = require('./lib/gdrive');
 const tools = require('./lib/tools');
 const github = require('./lib/github');
 const agent = require('./lib/agent');
@@ -34,23 +35,36 @@ let engine = null;
 let panel = null;
 let ocrWorker = null;
 let voiceInst = null;
-let supertonic = null;
 let phonon = null;
 let voxtral = null;
+let mcp = null;
+let gdrive = null;
 const procs = new Procs();
 
 const send = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
 };
 
+/** Glas-Effekt möglich? Mac immer, Windows ab Windows 11 22H2 (Build 22621). */
+function glassSupported() {
+  if (process.platform === 'darwin') return true;
+  if (process.platform === 'win32') return Number(String(os.release()).split('.')[2]) >= 22621;
+  return false;
+}
+
 function createWindow() {
   nativeTheme.themeSource = store.getSettings().theme === 'light' ? 'light' : 'dark';
+  const glass = glassSupported();
   win = new BrowserWindow({
     width: 1240,
     height: 800,
     minWidth: 860,
     minHeight: 560,
-    backgroundColor: store.getSettings().theme === 'light' ? '#faf9f5' : '#262624',
+    // Glas: Mac = Vibrancy, Windows 11 = Acrylic. Die Oberfläche macht nur die Einstellungs-Seitenleiste durchsichtig.
+    backgroundColor: glass ? '#00000000' : (store.getSettings().theme === 'light' ? '#ffffff' : '#1e1e20'),
+    ...(process.platform === 'darwin' ? { vibrancy: 'sidebar', visualEffectState: 'active', titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
+    ...(glass && process.platform === 'win32' ? { backgroundMaterial: 'acrylic' } : {}),
+    icon: path.join(__dirname, 'build-assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     title: 'FA KI Desktop',
     autoHideMenuBar: true,
     webPreferences: {
@@ -120,8 +134,7 @@ if (!gotLock) {
       resolveModel: (name) => models.find(name),
       onStatus: (text) => send('models:engineStatus', { text }),
     });
-    supertonic = new Supertonic(dataDir, (p) => send('speech:progress', p));
-    speech = new SpeechManager(dataDir, (p) => send('speech:progress', p), app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled'));
+    speech = new SpeechManager();
     const bundled = app.isPackaged ? process.resourcesPath : path.join(__dirname, 'build-bundled');
     phonon = new Phonon(dataDir, bundled, (p) => send('speech:progress', p));
     voxtral = new Voxtral(dataDir, () => findServerExe(process.resourcesPath, __dirname), (p) => send('speech:progress', p));
@@ -133,17 +146,24 @@ if (!gotLock) {
 
     voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'oute_server.py'), (p) => send('voice:progress', p));
     panel = new Panel(() => win, send);
+    const secure = {
+      encrypt: (t) => (safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(t).toString('base64') : 'raw:' + t),
+      decrypt: (e) => (String(e).startsWith('enc:') ? safeStorage.decryptString(Buffer.from(String(e).slice(4), 'base64')) : String(e).replace(/^raw:/, '')),
+    };
+    mcp = new McpManager({ dataDir, secure, openAuth: openAuthWindow, onChange: () => send('mcp:changed', {}) });
+    gdrive = new GDrive({ store: { get: () => mcp._auth('gdrive'), set: (o) => mcp._setAuth('gdrive', o) }, openAuth: openAuthWindow });
+    mcp.connectAll();
     registerIpc();
     createWindow();
-    // Reste älterer Versionen (Piper-Programm und Piper-Stimmen) entfernen
-    for (const d of ['piper', 'voices']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
-    // Spracherkennung vorwärmen: whisper-server lädt das Modell einmal und behält es im Speicher.
+    // Reste älterer Versionen entfernen: Piper, Supertonic und Whisper gibt es seit 2.5.1 nicht mehr.
+    for (const d of ['piper', 'voices-piper', 'supertonic', 'whisper']) fs.rm(path.join(dataDir, d), { recursive: true, force: true }, () => {});
+    // Spracherkennung (Voxtral) vorwärmen, falls geladen.
     setTimeout(() => { warmStt(); }, 3000);
     let st = store.getSettings();
-    if (st.ttsEngine === 'piper') { store.setSettings({ ttsEngine: 'supertonic' }); st = store.getSettings(); }
-    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft -> zurück auf Supertonic
+    if (!['phonon', 'server'].includes(st.ttsEngine)) { store.setSettings({ ttsEngine: 'phonon' }); st = store.getSettings(); }
+    // Frühere Versionen: alter Chatterbox-Server ist abgeschafft
     if (/voice_server\.py/.test(st.ttsServerCmd || '')) {
-      store.setSettings({ ttsEngine: 'supertonic', ttsServerAuto: false, ttsServerCmd: '', ttsServerLangs: 'all' });
+      store.setSettings({ ttsEngine: 'phonon', ttsServerAuto: false, ttsServerCmd: '' });
       st = store.getSettings();
     }
     voiceInst.syncServer();
@@ -276,6 +296,28 @@ function registerIpc() {
       return { ok: false, error: String(e.message || e) };
     }
   });
+  // ---------- MCP (Verbindungen) ----------
+  const mcpState = () => ({ catalog: mcp.catalog(), servers: mcp.list(), github: { connected: !!store.getSettings().githubTokenEnc }, gdrive: gdrive.status() });
+  ipcMain.handle('mcp:state', () => mcpState());
+  ipcMain.handle('mcp:connectCatalog', async (_e, catalogId) => {
+    const sid = mcp.addCatalog(String(catalogId));
+    try { await mcp.connect(sid); return { ok: true, state: mcpState() }; } catch (e) { return { ok: false, error: String(e.message || e), state: mcpState() }; }
+  });
+  ipcMain.handle('mcp:connect', async (_e, sid) => {
+    try { await mcp.connect(String(sid)); return { ok: true, state: mcpState() }; } catch (e) { return { ok: false, error: String(e.message || e), state: mcpState() }; }
+  });
+  ipcMain.handle('mcp:addCustom', async (_e, cfg) => {
+    let sid;
+    try { sid = mcp.addCustom(cfg || {}); } catch (e) { return { ok: false, error: String(e.message || e), state: mcpState() }; }
+    if (cfg && cfg.enabled === false) return { ok: true, state: mcpState() };
+    try { await mcp.connect(sid); return { ok: true, state: mcpState() }; } catch (e) { return { ok: true, warn: String(e.message || e), state: mcpState() }; }
+  });
+  ipcMain.handle('mcp:update', async (_e, { id: sid, patch }) => { mcp.update(String(sid), patch || {}); if (patch && patch.enabled === true) await mcp.connect(String(sid), { interactive: false }).catch(() => {}); return mcpState(); });
+  ipcMain.handle('mcp:remove', async (_e, sid) => { await mcp.remove(String(sid)); return mcpState(); });
+  ipcMain.handle('gdrive:connect', async (_e, { clientId, clientSecret }) => {
+    try { await gdrive.connect(clientId, clientSecret); return { ok: true, state: mcpState() }; } catch (e) { return { ok: false, error: String(e.message || e), state: mcpState() }; }
+  });
+  ipcMain.handle('gdrive:disconnect', () => { gdrive.disconnect(); return mcpState(); });
   ipcMain.handle('mail:setPassword', (_e, pw) => { setMailPassword(String(pw || '').replace(/\s+/g, '')); return publicSettings(store.getSettings()); });
   ipcMain.handle('mail:test', async (_e, cfgIn) => {
     try {
@@ -322,7 +364,7 @@ function registerIpc() {
     else fs.writeFileSync(r.filePath, markdown, 'utf8');
     return r.filePath;
   });
-  ipcMain.handle('app:info', () => ({ version: app.getVersion(), dataDir: app.getPath('userData') }));
+  ipcMain.handle('app:info', () => ({ version: app.getVersion(), dataDir: app.getPath('userData'), glass: glassSupported(), platform: process.platform }));
   ipcMain.handle('app:openDataDir', () => shell.openPath(app.getPath('userData')));
 
   // ---------- Dateien wählen ----------
@@ -435,12 +477,18 @@ function registerIpc() {
         if (m.content || m.thinking) send('chat:delta', { id, content: m.content || '', thinking: m.thinking || '' });
         if (o.done) stats = { evalCount: o.eval_count, evalDuration: o.eval_duration, doneReason: o.done_reason, promptCount: o.prompt_eval_count };
       };
-      const toolList = useTools ? tools.toolsFor(store.getSettings()) : [];
+      const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user');
+      const extraTools = useTools ? [...mcp.toolsFor(lastUser && lastUser.content), ...gdrive.tools()] : [];
+      const toolList = useTools ? tools.toolsFor(store.getSettings(), extraTools) : [];
+      const confirmFn = (req) => confirmAction(String(chatId || id), req);
       if (toolList.length) {
         await tools.chatWithTools({
           chatStream: (b, cb, sig) => engine.chatStream(b, cb, sig),
           body, tools: toolList, signal: ctrl.signal, onObj,
-          ctx: { getToken: getGithubToken, mailSettings: store.getSettings(), getMailPassword, agentDir: store.getSettings().agentDir, confirm: (req) => confirmAction(String(chatId || id), req) },
+          ctx: {
+            getToken: getGithubToken, mailSettings: store.getSettings(), getMailPassword, agentDir: store.getSettings().agentDir, confirm: confirmFn,
+            extra: { has: (n) => mcp.has(n) || gdrive.has(n), run: (n, a) => (mcp.has(n) ? mcp.call(n, a, confirmFn) : gdrive.call(n, a)) },
+          },
           onTool: ({ label }) => send('chat:tool', { id, label }),
         });
       } else {
@@ -465,17 +513,30 @@ function registerIpc() {
   });
 
   // ---------- Sprache ----------
-  ipcMain.handle('speech:status', () => ({ ...speech.status(), supertonic: supertonic.status(), phonon: phonon.status(), voxtral: voxtral.status() }));
-  ipcMain.handle('speech:prepareStt', (_e, model) => speech.prepareStt(model));
-  ipcMain.handle('speech:abort', (_e, task) => { speech.abort(task); return true; });
-  ipcMain.handle('speech:transcribe', async (_e, { wav, lang, model }) => {
-    if (store.getSettings().sttEngine === 'voxtral') {
-      if (!voxtral.ready()) throw new Error('Voxtral ist noch nicht geladen (Einstellungen → Sprache).');
-      return voxtral.transcribe(wav);
-    }
-    return speech.transcribe(wav, lang, model);
+  ipcMain.handle('speech:status', () => ({ phonon: phonon.status(), voxtral: voxtral.status() }));
+  ipcMain.handle('speech:transcribe', async (_e, { wav }) => {
+    if (!voxtral.ready()) throw new Error('Voxtral ist noch nicht geladen (Einstellungen → Sprache).');
+    return voxtral.transcribe(wav);
   });
   ipcMain.handle('speech:warmStt', () => warmStt());
+  // Live-Diktat: Audio kommt in Stücken, Text geht laufend zurück (stt:delta)
+  let liveSess = null;
+  ipcMain.handle('stt:start', async () => {
+    if (liveSess) liveSess.cancel();
+    if (!voxtral.ready()) return { ok: false, error: 'Voxtral ist noch nicht geladen (Einstellungen → Sprache).' };
+    try {
+      const sess = await voxtral.live((text) => send('stt:delta', { text }));
+      liveSess = sess;
+      return { ok: true };
+    } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  });
+  ipcMain.on('stt:push', (_e, bytes) => { if (liveSess && bytes) liveSess.push(bytes); });
+  ipcMain.handle('stt:finish', async () => {
+    const sess = liveSess; liveSess = null;
+    if (!sess) return '';
+    return sess.finish();
+  });
+  ipcMain.handle('stt:cancel', () => { if (liveSess) { liveSess.cancel(); liveSess = null; } return true; });
   ipcMain.handle('voxtral:setup', async () => {
     try {
       await voxtral.install();
@@ -483,8 +544,7 @@ function registerIpc() {
       const t0 = Date.now();
       await voxtral.ensure();
       const seconds = (Date.now() - t0) / 1000;
-      speech.stopWhisperServer(); // Whisper muss nicht nebenbei Speicher belegen
-      const settings = publicSettings(store.setSettings({ sttEngine: 'voxtral' }));
+      const settings = publicSettings(store.getSettings());
       return { ok: true, seconds, settings };
     } catch (e) {
       return { ok: false, error: /abort/i.test(String(e && e.name)) ? 'Abgebrochen.' : String((e && e.message) || e) };
@@ -493,7 +553,7 @@ function registerIpc() {
   ipcMain.handle('voxtral:cancel', () => { voxtral.cancelInstall(); return true; });
   ipcMain.handle('voxtral:remove', () => {
     voxtral.remove();
-    return publicSettings(store.getSettings().sttEngine === 'voxtral' ? store.setSettings({ sttEngine: 'whisper' }) : store.getSettings());
+    return publicSettings(store.getSettings());
   });
   ipcMain.handle('phonon:setup', async () => {
     try {
@@ -511,7 +571,7 @@ function registerIpc() {
   ipcMain.handle('phonon:cancel', () => { phonon.cancelInstall(); return true; });
   ipcMain.handle('phonon:remove', () => {
     phonon.remove();
-    return publicSettings(store.getSettings().ttsEngine === 'phonon' ? store.setSettings({ ttsEngine: 'supertonic' }) : store.getSettings());
+    return publicSettings(store.getSettings());
   });
   // Vorschau einer Phonon-Stimme (unabhängig von der gespeicherten Auswahl)
   ipcMain.handle('phonon:preview', (_e, { voice, lang }) => {
@@ -520,38 +580,17 @@ function registerIpc() {
     phonon.cancel();
     return phonon.synthesize(text, { lang: l, voice });
   });
+  // Vorlesen: Phonon (Deutsch, Englisch, Französisch, Spanisch, Portugiesisch) oder „Meine Stimme“ (OuteTTS).
+  // Türkisch liest die System-Stimme (entscheidet die Oberfläche).
   ipcMain.handle('speech:synthesize', async (_e, { text, voice, speed }) => {
     const s = store.getSettings();
-    // Phonon spricht Deutsch, Englisch, Französisch, Spanisch, Portugiesisch – Türkisch übernimmt Supertonic.
-    if (s.ttsEngine === 'phonon' && voice !== 'tr' && phonon.modelReady()) {
-      const lang = s.ttsPhononLang && s.ttsPhononLang !== 'auto' ? s.ttsPhononLang : 'de';
-      try {
-        return await phonon.synthesize(text, { lang, voice: s.ttsPhononVoice || 'anton' });
-      } catch (e) {
-        // Nach „Stopp“ nicht einspringen; sonst übernimmt Supertonic, falls eingerichtet.
-        if (/499/.test(String(e && e.message)) || !supertonic.status().ready) throw e;
-      }
-    }
-    if (s.ttsEngine === 'server' && !(s.ttsServerLangs === 'de' && voice === 'tr')) return speech.synthesizeServer(text, voice, s, speed);
-    return supertonic.synthesize(text, voice, s.ttsStVoice || 'elena', speed);
+    if (s.ttsEngine === 'server') return speech.synthesizeServer(text, voice, s, speed);
+    if (!phonon.modelReady()) throw new Error('Phonon ist noch nicht geladen (Einstellungen → Sprache).');
+    const lang = s.ttsPhononLang && s.ttsPhononLang !== 'auto' ? s.ttsPhononLang : 'de';
+    return phonon.synthesize(text, { lang, voice: s.ttsPhononVoice || 'anton' });
   });
-  ipcMain.handle('supertonic:cancel', () => { supertonic.abort(); supertonic.cancel(); return true; });
-  ipcMain.handle('supertonic:setup', async () => {
-    try {
-      await supertonic.prepare();
-      const t0 = Date.now();
-      await supertonic.synthesize('Hallo, das ist ein kurzer Test.', 'de', store.getSettings().ttsStVoice || 'elena', 1);
-      const seconds = (Date.now() - t0) / 1000;
-      const settings = store.setSettings({ ttsEngine: 'supertonic', ttsSpeed: 1, ttsStVoice: store.getSettings().ttsStVoice || 'elena' });
-      return { ok: true, seconds, settings: { ttsEngine: 'supertonic', ttsSpeed: 1, ttsStVoice: (settings && settings.ttsStVoice) || 'elena' } };
-    } catch (e) {
-      return { ok: false, error: String((e && e.message) || e) };
-    }
-  });
-  ipcMain.handle('speech:serverVoices', (_e, url) => speech.serverVoices(url));
   ipcMain.handle('speech:cancelSynth', async () => {
-    // Stopp gilt für alle Stimmen-Motoren: Supertonic (läuft in der App) und den OuteTTS-Server.
-    supertonic.cancel();
+    // Stopp gilt für alle Stimmen-Motoren: Phonon und den OuteTTS-Server.
     phonon.cancel();
     const s = store.getSettings();
     if (s.ttsEngine === 'server') await speech.cancelServer(s.ttsServerUrl);
@@ -600,7 +639,7 @@ function registerIpc() {
       const sample = before.ttsSampleFile || '';
       const apply = (cmd) => store.setSettings({
         ttsEngine: 'server', ttsServerUrl: voiceInst.url(), ttsServerDir: r.dir, ttsServerCmd: cmd,
-        ttsServerAuto: true, ttsServerModel: 'oute', ttsServerVoice: '', ttsServerVoiceTr: '', ttsServerLangs: 'de',
+        ttsServerAuto: true, ttsServerModel: 'oute', ttsServerVoice: '',
       });
       await speech.cancelServer(voiceInst.url());
       await procs.stop('tts');
@@ -623,7 +662,7 @@ function registerIpc() {
         await procs.stop('tts');
         await procs.freePort(voiceInst.url(), path.join(app.getPath('userData'), 'voice'));
         if (/oute_server\.py/.test(before.ttsServerCmd || '')) { apply(before.ttsServerCmd); procs.ensureTtsServer(store.getSettings()).catch(() => {}); }
-        else store.setSettings({ ttsEngine: 'supertonic', ttsServerAuto: false });
+        else store.setSettings({ ttsEngine: 'phonon', ttsServerAuto: false });
         throw e;
       }
     } catch (e) {
@@ -632,12 +671,20 @@ function registerIpc() {
   });
 }
 
-/** Spracherkennung vorwärmen: je nach Einstellung Voxtral oder Whisper (das andere wird nicht geladen). */
+/** Spracherkennung (Voxtral) vorwärmen, falls geladen. */
 function warmStt() {
-  const s = store.getSettings();
-  if (s.sttEngine === 'voxtral' && voxtral.ready()) { speech.stopWhisperServer(); return voxtral.warm(); }
-  voxtral.stop();
-  return speech.warmStt(s.sttModel);
+  return voxtral.ready() ? voxtral.warm() : Promise.resolve(false);
+}
+
+/** Anmeldefenster für Verbindungen (Notion, Linear, Google …). Gibt eine Funktion zum Schließen zurück. */
+function openAuthWindow(url) {
+  const w = new BrowserWindow({
+    width: 520, height: 720, parent: win || undefined, modal: false, title: 'Anmelden – FA KI Desktop', autoHideMenuBar: true,
+    backgroundColor: '#1e1e20', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'persist:anmelden' },
+  });
+  w.webContents.setWindowOpenHandler(({ url: u }) => { if (/^https:\/\//i.test(u)) w.loadURL(u); return { action: 'deny' }; });
+  w.loadURL(url);
+  return () => { if (!w.isDestroyed()) setTimeout(() => { if (!w.isDestroyed()) w.close(); }, 900); };
 }
 
 async function ensureTessData() {
@@ -681,8 +728,8 @@ async function getOcrWorker() {
 app.on('before-quit', () => {
   procs.killAll();
   if (engine) engine.stop();
-  if (speech) speech.stopWhisperServer();
   if (voxtral) voxtral.stop();
+  if (mcp) mcp.closeAll().catch(() => {});
   if (phonon) phonon.cancel();
   if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
 });

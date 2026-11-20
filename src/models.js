@@ -297,7 +297,7 @@ export function mountLibrary(root, ctx) {
   root.innerHTML = '';
   const api = ctx.api;
   const page = el('div', 'library');
-  page.appendChild(el('h2', null, 'Meine Modelle'));
+  page.appendChild(el('h2', null, 'Bibliothek'));
 
   const dirRow = el('div', 'dir-row');
   const dic = el('span', 'dr-icon'); dic.innerHTML = icon('library', 18);
