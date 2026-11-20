@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.6
+
+- Lange Gespräche: Die App hält jetzt immer Platz für die Antwort (samt „Gedanken“) frei und misst, wie viele Tokens der Text wirklich braucht. Kein „keine Antwort erhalten“ mehr bei vollem Kontext; falls doch, eine klare Meldung.
+- Spracherkennung: Zeitlimit passend zur Aufnahme statt 3 Minuten. Hängt Voxtral auf der Grafikkarte (z. B. weil das Chat-Modell den Grafikspeicher füllt), startet es automatisch auf dem Prozessor neu.
+
 ## Neu in 2.5.5
 
 - Erkunden: Sonderformate, die nur mit einer abgewandelten Engine laufen (z. B. „PQ2_0“ bei Bonsai), werden nicht mehr angeboten.

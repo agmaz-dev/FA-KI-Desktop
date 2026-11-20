@@ -500,11 +500,24 @@ function systemText() {
  * Dateien und Bilder gehen nur mit der neuesten Nachricht vollständig mit, ältere werden gekürzt,
  * und die ältesten Runden fallen weg, wenn das Zeichenbudget (≈ num_ctx × 2,6) überschritten wird.
  */
+/** Zeichen pro Token: aus der letzten Antwort gemessen (Code, Emojis, Türkisch brauchen mehr Tokens), sonst 2,6. */
+function charsPerToken() {
+  const msgs = (state.chat && state.chat.messages) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const st = msgs[i].stats;
+    if (msgs[i].role === 'assistant' && st && st.promptCount > 500 && st.sentChars) return Math.min(4, Math.max(1.5, st.sentChars / st.promptCount));
+  }
+  return 2.6;
+}
+
 function buildOllamaMessages() {
   const sys = systemText();
   const all = state.chat.messages.filter((m) => m.role !== 'assistant' || m.content);
   const lastUser = all.map((m) => m.role).lastIndexOf('user');
-  const budget = Math.max(6000, Math.floor(state.settings.numCtx * 2.6) - 2000) - (sys ? sys.length : 0);
+  // Platz für die Antwort (samt „Gedanken“) freihalten, sonst bricht die Engine bei vollem Kontext ohne Antwort ab
+  const numCtx = state.settings.numCtx;
+  const reserve = Math.min(8000, Math.max(2048, Math.floor(numCtx * 0.35)));
+  const budget = Math.max(4000, Math.floor((numCtx - reserve - 500) * charsPerToken())) - (sys ? sys.length : 0);
   const out = [];
   let used = 0;
   for (let i = all.length - 1; i >= 0; i--) {
@@ -522,6 +535,7 @@ function buildOllamaMessages() {
     out.unshift(o);
   }
   if (sys) out.unshift({ role: 'system', content: sys });
+  state.lastSentChars = out.reduce((t, m) => t + (m.content || '').length, 0);
   return out;
 }
 
@@ -643,7 +657,12 @@ async function finishStream(id, extra) {
   Object.assign(s.asst, extra || {});
   state.streaming = null;
   setBusy(false);
-  if (!s.asst.content && !s.asst.thinking && !s.asst.error) s.asst.content = '_(keine Antwort erhalten)_';
+  if (!s.asst.content && !s.asst.error) {
+    const st = s.asst.stats || {};
+    const full = st.doneReason === 'length' || (st.promptCount && st.promptCount + (st.evalCount || 0) >= state.settings.numCtx - 64);
+    if (full) s.asst.error = 'Der Kontext war voll, bevor eine Antwort kam. Ich kürze ab jetzt ältere Nachrichten stärker – bitte einfach nochmal senden (oder einen neuen Chat beginnen).';
+    else if (!s.asst.thinking) s.asst.content = '_(keine Antwort erhalten)_';
+  }
   state.chat.updated = Date.now();
   fillMsg(s.wrap, s.asst, false, true);
   if (s.asst.content && !s.asst.error && !(extra && extra.aborted)) { const h = extractHtml(s.asst.content); if (h) openPanelHtml(h, 'Vorschau'); }
@@ -654,7 +673,7 @@ async function finishStream(id, extra) {
   if ((state.settings.ttsAuto || state.conv) && s.asst.content && !s.asst.error && !(extra && extra.aborted)) await speakNow(s.asst.content);
   if (state.conv) convListen();
 }
-api.chat.onDone(({ id, stats, aborted }) => finishStream(id, { stats, aborted }));
+api.chat.onDone(({ id, stats, aborted }) => finishStream(id, { stats: stats ? { ...stats, sentChars: state.lastSentChars || 0 } : stats, aborted }));
 api.chat.onError(({ id, error }) => finishStream(id, { error }));
 
 // ---------- Vorlesen ----------

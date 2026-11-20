@@ -204,6 +204,7 @@ if (!gotLock) {
     phonon = new Phonon(dataDir, bundled, (p) => send('speech:progress', p));
     voxtral = new Voxtral(dataDir, () => findServerExe(process.resourcesPath, __dirname), (p) => send('speech:progress', p));
     voxtral.onSpawn = (pid) => orphans.add(pid);
+    voxtral.onNote = (text) => { startLog(text); send('hfweb:notice', { text }); };
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       cb(permission === 'media' || permission === 'clipboard-sanitized-write');
