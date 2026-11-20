@@ -14,6 +14,7 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 ## Neu in 2.5.6
 
 - Lange Gespräche: Die App hält jetzt immer Platz für die Antwort (samt „Gedanken“) frei und misst, wie viele Tokens der Text wirklich braucht. Kein „keine Antwort erhalten“ mehr bei vollem Kontext; falls doch, eine klare Meldung.
+- Diktat: Nach dem Stopp zeigt der Mikrofon-Knopf orange „Erkennung läuft“; ein Klick bricht ab. Es läuft immer nur ein Diktat, und Text, den man selbst ändert oder löscht, wird nicht mehr überschrieben.
 - Spracherkennung: Zeitlimit passend zur Aufnahme statt 3 Minuten. Hängt Voxtral auf der Grafikkarte (z. B. weil das Chat-Modell den Grafikspeicher füllt), startet es automatisch auf dem Prozessor neu.
 
 ## Neu in 2.5.5
