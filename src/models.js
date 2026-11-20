@@ -48,7 +48,58 @@ export function mountExplore(root, ctx) {
   const sWrap = el('div', 'search-wrap');
   const histBox = el('div', 'history hidden');
   sWrap.append(sbox, histBox);
-  page.appendChild(sWrap);
+  // Umschalter: eigene Suche oder die echte Webseite huggingface.co
+  const top = el('div', 'ex-top');
+  const seg = el('span', 'ap-seg');
+  const segS = el('button', 'on', 'Suche'); segS.type = 'button';
+  const segW = el('button', '', 'huggingface.co'); segW.type = 'button';
+  seg.append(segS, segW);
+  top.append(seg, sWrap);
+  page.appendChild(top);
+  // ----- Webseite -----
+  const web = el('div', 'hfweb hidden');
+  const wbar = el('div', 'hfweb-bar');
+  const wb = (ic, title, what) => { const b = el('button', 'ap-btn ap-icon'); b.type = 'button'; b.innerHTML = icon(ic, 16); b.title = title; b.setAttribute('aria-label', title); b.onclick = () => api.hfweb.nav({ what }); return b; };
+  const bBack = wb('chevleft', 'Zurück', 'back');
+  const bFwd = wb('chevright', 'Vorwärts', 'forward');
+  const bReload = wb('refresh', 'Neu laden', 'reload');
+  const bHome = wb('search', 'GGUF-Modelle auf Hugging Face', 'home');
+  const wUrl = el('div', 'hfweb-url', 'huggingface.co');
+  const bLoad = el('button', 'ap-btn blue', 'In FA KI laden'); bLoad.type = 'button'; bLoad.disabled = true;
+  const bExt = wb('external', 'Im normalen Browser öffnen', 'external');
+  wbar.append(bBack, bFwd, bReload, bHome, wUrl, bLoad, bExt);
+  const wHint = el('div', 'hfweb-hint', 'Tipp: Auf einer Modellseite „In FA KI laden“ klicken, oder unter „Files“ direkt auf eine .gguf-Datei – sie landet im Modellordner.');
+  const wArea = el('div', 'hfweb-area');
+  web.append(wbar, wHint, wArea);
+  let webRepo = '';
+  let mode = 'search';
+  const sendBounds = () => {
+    if (mode !== 'web' || !wArea.isConnected) return api.hfweb.bounds({ visible: false });
+    const r = wArea.getBoundingClientRect();
+    api.hfweb.bounds({ rect: { x: r.left, y: r.top, width: r.width, height: r.height }, visible: r.width > 20 && r.height > 20 });
+  };
+  const ro = new ResizeObserver(sendBounds);
+  ro.observe(wArea);
+  window.addEventListener('resize', sendBounds);
+  const offWeb = api.hfweb.onState((st) => {
+    wUrl.textContent = st.loading ? 'Lädt …' : (st.url || '').replace(/^https:\/\//, '');
+    wUrl.title = st.title || '';
+    bBack.disabled = !st.canBack; bFwd.disabled = !st.canForward;
+    webRepo = st.repo || '';
+    bLoad.disabled = !webRepo;
+    bLoad.textContent = webRepo ? `„${webRepo.split('/')[1]}“ in FA KI laden` : 'In FA KI laden';
+  });
+  const setMode = (m) => {
+    mode = m;
+    segS.classList.toggle('on', m === 'search'); segW.classList.toggle('on', m === 'web');
+    sWrap.classList.toggle('hidden', m === 'web');
+    cols.classList.toggle('hidden', m === 'web');
+    web.classList.toggle('hidden', m !== 'web');
+    requestAnimationFrame(sendBounds);
+  };
+  segS.onclick = () => setMode('search');
+  segW.onclick = () => setMode('web');
+  bLoad.onclick = () => { if (!webRepo) return; setMode('search'); q.value = webRepo; doSearch(); };
   function hideHist() { histBox.classList.add('hidden'); }
   function showHist() {
     const f = q.value.trim().toLowerCase();
@@ -99,9 +150,11 @@ export function mountExplore(root, ctx) {
   split.addEventListener('dblclick', () => { lw = 340; cols.style.gridTemplateColumns = `${lw}px 8px minmax(0, 1fr)`; try { localStorage.removeItem('fa.exploreListW'); } catch { /* egal */ } });
   cols.append(listWrap, split, right);
   page.appendChild(cols);
+  page.appendChild(web);
   root.appendChild(page);
 
   let selected = '';
+  let searchNo = 0;
   const installedNames = () => new Set((ctx.models() || []).map((m) => m.name.toLowerCase()));
 
   function showEmpty() {
@@ -166,7 +219,9 @@ export function mountExplore(root, ctx) {
 
     right.appendChild(el('h3', null, 'Download-Optionen'));
     if (!d.quants.length) {
-      right.appendChild(el('div', 'err', 'In diesem Repo liegen keine direkt ladbaren GGUF-Dateien.'));
+      right.appendChild(el('div', 'err', d.ggufCount
+        ? 'Die GGUF-Dateien in diesem Repo sind nur Hilfsdateien (z. B. LoRA-Adapter, Tokenizer, Bildteil) und kein eigenständiges Modell.'
+        : 'In diesem Repo liegen keine GGUF-Dateien. Die eingebaute Engine lädt nur GGUF – suche nach demselben Namen mit „GGUF“ (z. B. von unsloth, bartowski oder lmstudio-community).'));
     } else {
       const have = installedNames();
       const tbl = el('div', 'quant-table');
@@ -252,12 +307,28 @@ export function mountExplore(root, ctx) {
       return;
     }
     count.textContent = 'Suche …';
-    let list = [];
-    try { list = await api.hf.search({ query: q.value.trim(), sort: sort.value }); }
+    const mySearch = ++searchNo;
+    let r;
+    try { r = await api.hf.search({ query: term, sort: sort.value }); }
     catch (e) { count.textContent = ''; left.appendChild(el('div', 'err', 'Suche nicht möglich: ' + cleanErr(e))); return; }
-    count.textContent = `${list.length} Ergebnisse auf Hugging Face`;
-    if (!list.length) { left.appendChild(el('div', 'note', 'Nichts gefunden.')); return; }
-    for (const m of list) left.appendChild(card(m));
+    if (mySearch !== searchNo) return;
+    let shown = 0;
+    const addPage = (page) => {
+      for (const m of page.items) left.appendChild(card(m));
+      shown += page.items.length;
+      count.textContent = `${shown}${page.next ? '+' : ''} Ergebnisse auf Hugging Face`;
+      if (!page.next) return;
+      // Weitere Seiten von Hugging Face nachladen (je 100)
+      const more = el('button', 'btn small more-btn', 'Weitere laden');
+      more.onclick = async () => {
+        more.disabled = true; more.textContent = 'Lädt …';
+        try { const p2 = await api.hf.search({ query: term, sort: sort.value, next: page.next }); more.remove(); addPage(p2); }
+        catch (e) { more.disabled = false; more.textContent = 'Weitere laden'; count.textContent = 'Fehler: ' + cleanErr(e); }
+      };
+      left.appendChild(more);
+    };
+    if (!r.items.length) { count.textContent = '0 Ergebnisse'; left.appendChild(el('div', 'note', 'Nichts gefunden. Tipp: Link oder „autor/name“ einfügen öffnet das Modell direkt – oder rechts oben „huggingface.co“ öffnen und dort suchen.')); return; }
+    addPage(r);
   }
 
   /** Karte in der Trefferliste. bare = nur Name (direkt geöffnetes Repo, Zahlen stehen rechts). */
@@ -290,7 +361,7 @@ export function mountExplore(root, ctx) {
   sort.onchange = doSearch;
   showEmpty();
   doSearch();
-  return () => { offDl(); };
+  return () => { offDl(); offWeb(); ro.disconnect(); window.removeEventListener('resize', sendBounds); api.hfweb.bounds({ visible: false }); };
 }
 
 export function mountLibrary(root, ctx) {

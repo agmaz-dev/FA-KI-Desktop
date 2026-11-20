@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.2
+- **Erkunden findet mehr:** „Weitere laden“ holt beliebig viele Treffer (je 100). Ohne Treffer mit Leerzeichen („qwen 3.5“) wird auch „qwen3.5“ versucht.
+- **Alle Modelldateien ladbar:** Auch neue Formate (NVFP4, FP16, TQ1_0, „4bpw“ …) und Dateien ohne Stufe im Namen erscheinen als Download-Option. Hilfsdateien (imatrix, MTP-Entwürfe, LoRA, Tokenizer) werden ausgeblendet; enthält ein Repo nur solche, sagt die App das klar.
+- **huggingface.co direkt in Erkunden:** Umschalter „Suche | huggingface.co“ zeigt die echte Webseite. Auf einer Modellseite lädt „In FA KI laden“ das Modell, ein Klick auf eine .gguf-Datei reiht sie in die Downloads ein.
+
 ## Neu in 2.5.1
 - **Neues Design im Apple-Stil:** Einstellungen mit einer Zeile pro Einstellung, Gruppen-Kästen, farbigen Symbolen und Suchfeld. Die Seitenleiste der Einstellungen ist aus Glas (Mac: Vibrancy, Windows 11: Acrylic). Jede Änderung gilt sofort, ohne „Speichern“. Chatfenster neu gestaltet, Blau als Akzent.
 - **Neues Logo** als App-, Desktop- und Dock-Symbol und in der App.

@@ -59,7 +59,8 @@ test('Suche und Details mit nachgebauter Hugging-Face-Antwort', async () => {
     return new Response('', { status: 404 });
   };
   const r = await hf.search('gpt-oss', {}, fetchImpl);
-  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r.items.length, 1);
+  assert.strictEqual(r.next, '');
   assert.match(urls[0], /filter=gguf.*search=gpt-oss/);
   const d = await hf.details('unsloth/gpt-oss-20b-GGUF', hw, fetchImpl);
   assert.strictEqual(d.quants.length, 2);
@@ -87,4 +88,45 @@ test('Download-Plan: Dateien einer Stufe, Bildteil, fehlende Stufe', async () =>
   assert.ok(p.features.includes('Bilder'));
   await assert.rejects(() => hf.plan('o/r', 'Q2_K', fetchImpl), /gibt es in diesem Repo nicht/);
   await assert.rejects(() => hf.plan('../x', 'Q4', fetchImpl), /Ungültig/);
+});
+
+test('Stufen erkennen: neue Formate, Dateien ohne Stufe, Hilfsdateien ausgeblendet', () => {
+  const names = (files) => hf.quantsFromFiles(files.map((f) => ({ rfilename: f, size: GB }))).quants.map((q) => q.name).sort();
+  assert.deepStrictEqual(names(['x/Qwen3.8-27B-iMatrix-NVFP4-MTP.gguf']), ['NVFP4']);
+  assert.deepStrictEqual(names(['m-fp16.gguf', 'm-Q4_K_M.gguf', 'm.imatrix.gguf', 'mtp-m.gguf', 'imatrix_unsloth.gguf']), ['F16', 'Q4_K_M']);
+  assert.deepStrictEqual(names(['Ornith-APEX-I-Balanced.gguf', 'Ornith-APEX-I-Compact.gguf']), ['BALANCED', 'COMPACT']);
+  assert.deepStrictEqual(names(['drama3-2bpw-k192.gguf', 'drama3-4bpw-k256.gguf']), ['2BPW', '4BPW']);
+  assert.deepStrictEqual(names(['flint-terse.gguf']), ['FLINT-TERSE']);
+  assert.deepStrictEqual(names(['m-TQ1_0.gguf', 'lora/x-LoRA.gguf', 'gguf-lora/y.gguf']), ['TQ1_0']);
+  // geteilte Dateien in einem Ordner: der Ordner ist die Stufe
+  const q = hf.quantsFromFiles([1, 2, 3].map((i) => ({ rfilename: `Mix-128G/DS-Mix-128G-0000${i}-of-00003.gguf`, size: GB })));
+  assert.strictEqual(q.quants.length, 1);
+  assert.strictEqual(q.quants[0].files, 3);
+  assert.strictEqual(hf.quantOfFile([{ rfilename: 'a-Q8_0.gguf', size: 1 }, { rfilename: 'a-Q4_0.gguf', size: 1 }], 'a-Q4_0.gguf'), 'Q4_0');
+  // Jede Stufe passt zum Download-Namen
+  for (const n of names(['Ornith-APEX-I-Balanced.gguf', 'x-NVFP4.gguf'])) assert.ok(hf.parsePull('a/b:' + n), n);
+});
+
+test('Suche: weitere Seiten über den Link-Kopf, Leerzeichen-Ersatzsuche', async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    const empty = /search=qwen%203\.5/.test(url);
+    return new Response(JSON.stringify(empty ? [] : [{ id: 'a/b-GGUF' }]), { headers: { link: '<https://huggingface.co/api/models?cursor=abc&limit=100>; rel="next"' } });
+  };
+  const r = await hf.search('qwen 3.5', {}, fetchImpl);
+  assert.strictEqual(r.items.length, 1);
+  assert.match(urls[1], /search=qwen3\.5/);
+  assert.strictEqual(r.next, 'https://huggingface.co/api/models?cursor=abc&limit=100');
+  const r2 = await hf.search('', { next: r.next }, fetchImpl);
+  assert.strictEqual(urls.at(-1), r.next);
+  assert.strictEqual(r2.items.length, 1);
+  await assert.rejects(hf.search('', { next: 'https://evil.example/x' }, fetchImpl), /Ungültige/);
+});
+
+test('Download-Link von huggingface.co erkennen', () => {
+  assert.deepStrictEqual(hf.parseResolve('https://huggingface.co/unsloth/Qwen3-GGUF/resolve/main/Q4_K_M/Qwen3-Q4_K_M-00001-of-00002.gguf?download=true'), { id: 'unsloth/Qwen3-GGUF', file: 'Q4_K_M/Qwen3-Q4_K_M-00001-of-00002.gguf' });
+  assert.strictEqual(hf.parseResolve('https://evil.example/a/b/resolve/main/x.gguf'), null);
+  assert.strictEqual(hf.parseResolve('https://huggingface.co/models?search=x'), null);
+  assert.strictEqual(hf.repoFromInput('https://huggingface.co/unsloth/Qwen3-GGUF/tree/main'), 'unsloth/Qwen3-GGUF');
 });

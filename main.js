@@ -16,6 +16,7 @@ const { Phonon } = require('./lib/phonon');
 const { Voxtral } = require('./lib/voxtral');
 const { McpManager } = require('./lib/mcp');
 const { GDrive } = require('./lib/gdrive');
+const { HfWeb } = require('./lib/hfweb');
 const tools = require('./lib/tools');
 const github = require('./lib/github');
 const agent = require('./lib/agent');
@@ -39,6 +40,7 @@ let phonon = null;
 let voxtral = null;
 let mcp = null;
 let gdrive = null;
+let hfweb = null;
 const procs = new Procs();
 
 const send = (ch, payload) => {
@@ -146,6 +148,14 @@ if (!gotLock) {
 
     voiceInst = new VoiceInstaller(dataDir, path.join(__dirname, 'voice-server', 'oute_server.py'), (p) => send('voice:progress', p));
     panel = new Panel(() => win, send);
+    // huggingface.co in „Erkunden“: Klick auf eine .gguf-Datei -> passende Stufe in die Download-Reihe
+    hfweb = new HfWeb(() => win, send, async ({ id: repo, file }) => {
+      try {
+        const label = hf.quantOfFile(await hf.siblings(repo, undefined, getHfToken()), file);
+        if (!label) return send('hfweb:notice', { text: `„${file}“ ist kein eigenständiges Modell (z. B. Bildteil oder Adapter).` });
+        send('hfweb:download', { name: `${repo}:${label}` });
+      } catch (e) { send('hfweb:notice', { text: 'Download nicht möglich: ' + String(e.message || e) }); }
+    });
     const secure = {
       encrypt: (t) => (safeStorage.isEncryptionAvailable() ? 'enc:' + safeStorage.encryptString(t).toString('base64') : 'raw:' + t),
       decrypt: (e) => (String(e).startsWith('enc:') ? safeStorage.decryptString(Buffer.from(String(e).slice(4), 'base64')) : String(e).replace(/^raw:/, '')),
@@ -336,7 +346,9 @@ function registerIpc() {
   ipcMain.handle('agent:clearDir', () => publicSettings(store.setSettings({ agentDir: '' })));
   ipcMain.handle('agent:check', () => agent.checkTools());
   ipcMain.handle('agent:openDir', () => { const d = store.getSettings().agentDir; return d ? shell.openPath(d) : ''; });
-  ipcMain.handle('hf:search', (_e, { query, sort }) => hf.search(query, { sort }));
+  ipcMain.handle('hfweb:bounds', (_e, { rect, visible }) => { hfweb.setBounds(rect || {}, !!visible); return true; });
+  ipcMain.handle('hfweb:nav', (_e, { what, url }) => { hfweb.nav(String(what), url ? String(url) : ''); return true; });
+  ipcMain.handle('hf:search', (_e, { query, sort, next }) => hf.search(query, { sort, next }));
   ipcMain.handle('hf:details', (_e, id) => hf.details(id, hf.hwFor(store.getSettings(), process.platform, os.totalmem())));
   ipcMain.handle('chats:list', () => store.listChats());
   ipcMain.handle('chats:load', (_e, id) => store.loadChat(id));

@@ -568,3 +568,12 @@ html.no-tokens .stats, html.no-tokens #ctxInfo { display: none; }
 .empty h1, .col-detail h2, .library h2 { font-family: var(--font-sans); font-weight: 700; }
 .ap-row > .ap-sw, .ap-row > .ap-seg { margin-left: auto; }
 .settings-page.ap .ap-body > h2.ap-h { margin-bottom: -15px; }
+/* Erkunden: Umschalter Suche | huggingface.co und eingebettete Webseite */
+.ex-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex: none; }
+.ex-top .search-wrap { flex: 1; min-width: 0; }
+.hfweb { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.hfweb-bar { display: flex; align-items: center; gap: 4px; padding: 4px 0 8px; flex: none; }
+.hfweb-url { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); background: rgba(127,127,135,.14); border-radius: 999px; padding: 5px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 6px; }
+.hfweb-hint { font-size: 11px; color: var(--muted); margin: 0 4px 8px; flex: none; }
+.hfweb-area { flex: 1; min-height: 200px; border: .5px solid var(--line); border-radius: 10px; background: #fff; }
+.more-btn { margin: 10px auto; display: block; }

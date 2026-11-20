@@ -901,6 +901,9 @@ async function startPull(name) {
 }
 function dlCancel(name) { api.models.cancel(name); }
 function dlDismiss(name) { if (name) dls.delete(name); else for (const [k, d] of dls) if (d.state !== 'queued' && d.state !== 'running') dls.delete(k); dlEmit(); }
+// Klick auf eine .gguf-Datei in huggingface.co (Erkunden): in die Download-Reihe
+api.hfweb.onDownload(({ name }) => { startPull(name); hint('Download eingereiht: ' + name, 6000); });
+api.hfweb.onNotice(({ text }) => hint(text, 6000));
 api.models.onState((st) => {
   const d = dls.get(st.name);
   if (!d) return;
@@ -996,7 +999,7 @@ function showSettings(tab) {
   openSettings({
     get settings() { return state.settings; },
     api,
-    mount: (build) => { page.innerHTML = ''; const wrap = el('div', 'settings-page'); page.appendChild(wrap); build(wrap); },
+    mount: (build) => { if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; } page.innerHTML = ''; const wrap = el('div', 'settings-page'); page.appendChild(wrap); build(wrap); },
     explore: (root) => { pageCleanup = mountExplore(root, modelsCtx()); },
     library: (root) => { pageCleanup = mountLibrary(root, modelsCtx()); },
     close: () => showView('chat'),

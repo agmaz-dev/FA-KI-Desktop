@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
     onChange: on('mcp:changed'),
   },
   agent: { pickDir: inv('agent:pickDir'), clearDir: inv('agent:clearDir'), check: inv('agent:check'), openDir: inv('agent:openDir') },
+  hfweb: { bounds: inv('hfweb:bounds'), nav: inv('hfweb:nav'), onState: on('hfweb:state'), onDownload: on('hfweb:download'), onNotice: on('hfweb:notice') },
   hf: { search: inv('hf:search'), details: inv('hf:details'), translate: inv('hf:translate'), setToken: inv('hf:setToken') },
   panel: { bounds: inv('panel:bounds'), openUrl: inv('panel:openUrl'), html: inv('panel:html'), nav: inv('panel:nav'), newTab: inv('panel:newTab'), selectTab: inv('panel:selectTab'), closeTab: inv('panel:closeTab'), close: inv('panel:close'), external: inv('panel:external'), pdf: inv('panel:pdf'), onState: on('panel:state') },
   sys: { stats: inv('sys:stats') },
