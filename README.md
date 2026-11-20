@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.5
+
+- Erkunden: Sonderformate, die nur mit einer abgewandelten Engine laufen (z. B. „PQ2_0“ bei Bonsai), werden nicht mehr angeboten.
+- Klare Meldung, wenn eine Modelldatei ein solches Sonderformat nutzt.
+
 ## Neu in 2.5.4
 
 - Schnellerer Start: das Fenster kommt zuerst, Verbindungen (MCP, Google Drive) und Vorwärmen laufen danach im Hintergrund. Das Startprotokoll zeigt die Zeit jedes Schritts.
