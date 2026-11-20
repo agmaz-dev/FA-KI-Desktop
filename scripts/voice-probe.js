@@ -11,7 +11,8 @@ const { Phonon, MODEL_FILES, voiceOf } = require('../lib/phonon');
 const { Voxtral } = require('../lib/voxtral');
 const { fetchFile } = require('../lib/download');
 
-const [ptts, llama, work] = process.argv.slice(2);
+const [ptts, llama, workArg] = process.argv.slice(2);
+const work = workArg && path.resolve(workArg);
 if (!ptts || !work) { console.error('Aufruf: voice-probe.js <ptts> <llama-server|-> <ordner>'); process.exit(2); }
 
 async function tree(repo, sub = '') {
