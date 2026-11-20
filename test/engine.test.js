@@ -175,3 +175,49 @@ test('Orphans merkt sich Nummern und räumt nur llama-server auf', async () => {
   o.clear();
   assert.equal(fs.existsSync(f), false);
 });
+
+// MTP: GGUF-Kopfdaten lesen und --spec-type draft-mtp setzen, bei Fehlschlag ohne MTP neu
+function writeGguf(file, kv) {
+  const parts = [Buffer.from('GGUF'), u32(3), u64(0), u64(kv.length)];
+  function u32(v) { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; }
+  function u64(v) { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; }
+  const str = (s) => Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s)]);
+  for (const [k, type, v] of kv) {
+    parts.push(str(k), u32(type));
+    if (type === 8) parts.push(str(v));
+    else if (type === 4) parts.push(u32(v));
+    else if (type === 9) { parts.push(u32(8), u64(v.length)); for (const x of v) parts.push(str(x)); }
+  }
+  require('fs').writeFileSync(file, Buffer.concat(parts));
+}
+
+test('mtpLayers liest nextn_predict_layers aus GGUF', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { mtpLayers, readMeta } = require('../lib/gguf');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-'));
+  const a = path.join(dir, 'a.gguf'); const b = path.join(dir, 'b.gguf');
+  writeGguf(a, [['general.architecture', 8, 'qwen35'], ['tokenizer.ggml.tokens', 9, ['a', 'bb', 'ccc']], ['qwen35.nextn_predict_layers', 4, 1]]);
+  writeGguf(b, [['general.architecture', 8, 'qwen35'], ['qwen35.block_count', 4, 32]]);
+  assert.equal(readMeta(a)['general.architecture'], 'qwen35');
+  assert.equal(mtpLayers(a), 1);
+  assert.equal(mtpLayers(b), 0);
+  assert.equal(mtpLayers(path.join(dir, 'fehlt.gguf')), 0);
+});
+
+test('Engine nutzt MTP und lädt bei Fehler ohne MTP neu', async () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { Engine } = require('../lib/engine');
+  const { EventEmitter } = require('events');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-')), 'm.gguf');
+  writeGguf(f, [['qwen35.nextn_predict_layers', 4, 1]]);
+  const runs = [];
+  const fake = (exe, args) => {
+    runs.push(args.includes('draft-mtp'));
+    const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.pid = 0; c.exitCode = null; c.kill = () => {};
+    setTimeout(() => { c.stderr.emit('data', 'something odd'); c.exitCode = 1; c.emit('exit', 1); }, 20);
+    return c;
+  };
+  const e = new Engine({ exePath: process.execPath, getSettings: () => ({}), resolveModel: () => ({ file: f }), spawnFn: fake });
+  await assert.rejects(e.ensure('m', 4096));
+  assert.deepEqual(runs.slice(0, 2), [true, false]);
+});

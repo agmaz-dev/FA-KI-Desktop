@@ -15,6 +15,7 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 - Erkunden: Sonderformate, die nur mit einer abgewandelten Engine laufen (z. B. „PQ2_0“ bei Bonsai), werden nicht mehr angeboten.
 - Klare Meldung, wenn eine Modelldatei ein solches Sonderformat nutzt.
+- Schnellmodus MTP: Hat eine Modelldatei eingebaute MTP-Köpfe (Vorausraten der nächsten Wörter), schaltet die App ihn automatisch ein. Klappt das Laden damit nicht, lädt sie ohne.
 
 ## Neu in 2.5.4
 
