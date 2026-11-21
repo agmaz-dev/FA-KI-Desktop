@@ -6,7 +6,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { McpManager, splitCommand, parsePairs, toolName, resultText, CATALOG } = require('../lib/mcp');
-const { LiveSession } = require('../lib/voxtral');
 const tools = require('../lib/tools');
 
 test('MCP: Befehl zerlegen, Paare lesen, Werkzeugnamen', () => {
@@ -90,35 +89,6 @@ test('GitHub-Werkzeuge nur mit gespeichertem Token (Verbindung unter MCP)', () =
 });
 
 /** Nachgebauter Voxtral-Live-Server */
-function fakeLiveWs() {
-  return class W {
-    constructor() { this.sent = []; W.last = this; setImmediate(() => this._srv({ type: 'session.created', session: { audio: { input: { format: { rate: 16000 } } } } })); }
-    _srv(m) { this.onmessage && this.onmessage({ data: JSON.stringify(m) }); }
-    send(s) {
-      const m = JSON.parse(s); this.sent.push(m);
-      if (m.type === 'input_audio_buffer.append') setImmediate(() => this._srv({ type: 'conversation.item.input_audio_transcription.delta', item_id: 'i', delta: ' Wort' + this.sent.length }));
-      if (m.type === 'input_audio_buffer.commit') setImmediate(() => { this._srv({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'i', transcript: 'Hallo Welt' }); this.onclose && this.onclose({}); });
-    }
-    close() {}
-  };
-}
-
-test('Live-Diktat: Audio vor dem Start wird gepuffert, Text kommt laufend, Ende liefert den ganzen Text', async () => {
-  const Ws = fakeLiveWs();
-  const deltas = [];
-  const s = new LiveSession('ws://x', { WebSocketImpl: Ws, onDelta: (t) => deltas.push(t) });
-  s.push(new Uint8Array(3200)); // vor session.created
-  await new Promise((r) => setTimeout(r, 20));
-  s.push(new Uint8Array(3201)); // ungerade Länge wird gekürzt
-  await new Promise((r) => setTimeout(r, 20));
-  assert.ok(deltas.length >= 2);
-  const text = await s.finish();
-  assert.strictEqual(text, 'Hallo Welt');
-  const appends = Ws.last.sent.filter((m) => m.type === 'input_audio_buffer.append');
-  assert.strictEqual(appends.length, 2);
-  assert.strictEqual(Buffer.from(appends[1].audio, 'base64').length, 3200);
-  assert.deepStrictEqual(Ws.last.sent.at(-1), { type: 'input_audio_buffer.commit', final: true });
-});
 
 test('MCP: „Einrichten“ mit Anmeldung (OAuth wie bei Notion/Linear) – Registrierung, Anmeldefenster, Token, Werkzeuge', async () => {
   const http = require('http');

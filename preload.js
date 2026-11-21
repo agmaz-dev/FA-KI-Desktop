@@ -44,7 +44,6 @@ contextBridge.exposeInMainWorld('api', {
     onTool: on('chat:tool'), onDelta: on('chat:delta'), onDone: on('chat:done'), onError: on('chat:error'),
   },
   ocr: { run: inv('ocr:run') },
-  stt: { start: inv('stt:start'), push: (bytes) => ipcRenderer.send('stt:push', bytes), finish: inv('stt:finish'), cancel: inv('stt:cancel'), onDelta: on('stt:delta') },
   voice: { status: inv('voice:status'), setup: inv('voice:setup'), cancel: inv('voice:cancel'), cleanOld: inv('voice:cleanOld'), onProgress: on('voice:progress') },
   phonon: { setup: inv('phonon:setup'), cancel: inv('phonon:cancel'), remove: inv('phonon:remove'), preview: inv('phonon:preview') },
   voxtral: { setup: inv('voxtral:setup'), cancel: inv('voxtral:cancel'), remove: inv('voxtral:remove') },

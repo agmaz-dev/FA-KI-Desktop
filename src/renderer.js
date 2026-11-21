@@ -753,15 +753,15 @@ async function transcribeWav(wav) {
   finally { hideProgress(); }
 }
 
-// Diktat: genau ein Lauf zur Zeit. Jeder Lauf hat eine Nummer; ein abgebrochener oder alter Lauf schreibt nie mehr ins Eingabefeld.
+// Diktat wie in der Claude-App: Klick = Aufnahme starten, Klick = stoppen, dann wird der ganze Satz erkannt.
+// Genau ein Lauf zur Zeit; ein abgebrochener Lauf schreibt nie ins Eingabefeld.
 let micRun = 0;
-let micBusy = null; // { run } solange nach dem Stopp noch erkannt wird
+let micBusy = null; // solange nach dem Stopp erkannt wird (Knopf orange, Klick bricht ab)
 
 function cancelMicBusy() {
   if (!micBusy) return;
-  micRun++; // alten Lauf ungültig machen
+  micRun++;
   micBusy = null;
-  api.stt.cancel().catch(() => {});
   hideProgress();
   renderMic();
   hint('Diktat abgebrochen.');
@@ -769,62 +769,49 @@ function cancelMicBusy() {
 
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
-  if (micBusy) { cancelMicBusy(); return; } // Klick während der Erkennung: abbrechen
+  if (micBusy) { cancelMicBusy(); return; }
   // Im Gesprächsmodus: Klick während des Vorlesens unterbricht die KI, dann sofort zuhören
   if (state.conv) { stopAllSpeech(); convListen(); return; }
   stopAllSpeech();
-  if (!(await ensureStt())) return;
   const run = ++micRun;
   const cur = () => run === micRun;
-  const input = $('input');
-  const base = input.value;
-  const join = (t) => (base && t ? base.replace(/\s+$/, '') + ' ' : base) + (t || '');
-  // Was das Diktat zuletzt geschrieben hat. Ändert der Nutzer das Feld selbst, hat seine Änderung Vorrang.
-  let written = base;
-  let userEdited = false;
-  const onEdit = () => { if (input.value !== written) userEdited = true; };
-  input.addEventListener('input', onEdit);
-  const write = (t) => {
-    if (!cur() || userEdited) return;
-    written = join(t);
-    input.value = written;
-    autosize();
-  };
-  // Live-Erkennung: Text erscheint schon während des Sprechens
-  const live = await api.stt.start().catch(() => ({ ok: false }));
-  const offDelta = live.ok ? api.stt.onDelta(({ text }) => write(text)) : () => {};
-  const cleanup = () => { offDelta(); input.removeEventListener('input', onEdit); };
-  if (!cur()) { cleanup(); if (live.ok) api.stt.cancel(); return; }
-  waveReset();
-  try {
-    state.rec = await startRecording({ vad: false, deviceId: state.settings.micId, onLevel: wavePush, onPcm: live.ok ? (b) => api.stt.push(b) : null });
-  } catch (e) {
-    cleanup(); if (live.ok) api.stt.cancel();
-    return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0);
-  }
-  renderMic();
-  const recH = state.rec;
-  const wav = await recH.done;
-  state.rec = null;
   micBusy = { run };
   renderMic();
-  let t = '';
+  const ok = await ensureStt().catch(() => false);
+  if (!cur()) return;
+  micBusy = null;
+  if (!ok) { renderMic(); return; }
+  api.speech.warmStt().catch(() => {}); // Erkennung schon während des Sprechens laden
+  waveReset();
+  let rec;
   try {
-    if (live.ok) {
-      showProgress('Letzte Wörter werden erkannt', null);
-      try { t = await api.stt.finish(); } catch { t = ''; }
-      if (cur() && !t && wav) t = await transcribeWav(wav); // Rückfall: ganze Aufnahme auf einmal
-    } else if (wav && recH.peak >= 0.006) {
-      t = await transcribeWav(wav);
-    }
-  } finally {
-    cleanup();
-    if (cur()) { micBusy = null; hideProgress(); renderMic(); }
+    rec = await startRecording({ vad: false, deviceId: state.settings.micId, onLevel: wavePush });
+  } catch (e) {
+    renderMic();
+    return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0);
   }
-  if (!cur()) return; // abgebrochen oder neuer Lauf
-  write(t);
-  if (!t && recH.peak < 0.006) hint('Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon.', 0);
-  if (t && !userEdited && state.settings.autoSend) send();
+  if (!cur()) { rec.cancel(); return; }
+  state.rec = rec;
+  renderMic();
+  const wav = await rec.done;
+  state.rec = null;
+  if (!cur()) { renderMic(); return; }
+  if (!wav || rec.peak < 0.006) {
+    renderMic();
+    return hint(wav ? 'Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon.' : 'Es wurde nichts aufgenommen.', 0);
+  }
+  micBusy = { run };
+  renderMic();
+  const t = await transcribeWav(wav);
+  if (!cur()) return;
+  micBusy = null;
+  renderMic();
+  if (!t) return;
+  const input = $('input');
+  input.value = (input.value.trim() ? input.value.replace(/\s+$/, '') + ' ' : '') + t;
+  autosize();
+  input.focus();
+  if (state.settings.autoSend) send();
 }
 
 async function convListen() {

@@ -645,24 +645,6 @@ function registerIpc() {
     return voxtral.transcribe(wav);
   });
   ipcMain.handle('speech:warmStt', () => warmStt());
-  // Live-Diktat: Audio kommt in Stücken, Text geht laufend zurück (stt:delta)
-  let liveSess = null;
-  ipcMain.handle('stt:start', async () => {
-    if (liveSess) liveSess.cancel();
-    if (!voxtral.ready()) return { ok: false, error: 'Voxtral ist noch nicht geladen (Einstellungen → Sprache).' };
-    try {
-      const sess = await voxtral.live((text) => send('stt:delta', { text }));
-      liveSess = sess;
-      return { ok: true };
-    } catch (e) { return { ok: false, error: String(e.message || e) }; }
-  });
-  ipcMain.on('stt:push', (_e, bytes) => { if (liveSess && bytes) liveSess.push(bytes); });
-  ipcMain.handle('stt:finish', async () => {
-    const sess = liveSess; liveSess = null;
-    if (!sess) return '';
-    return sess.finish();
-  });
-  ipcMain.handle('stt:cancel', () => { if (liveSess) { liveSess.cancel(); liveSess = null; } return true; });
   ipcMain.handle('voxtral:setup', async () => {
     try {
       await voxtral.install();

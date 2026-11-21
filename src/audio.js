@@ -42,10 +42,7 @@ async function blobToWav16k(blob) {
  * Startet eine Aufnahme. Mit vad=true endet sie automatisch nach einer Sprechpause.
  * Gibt { stop(), cancel(), done } zurück; done liefert WAV-Bytes (16 kHz, mono) oder null (nichts gesprochen).
  */
-/**
- * onPcm(bytes): bekommt laufend PCM16-Daten (16 kHz, mono) für die Live-Erkennung (Voxtral), etwa alle 0,25 s.
- */
-export async function startRecording({ vad = false, onLevel, onPcm, deviceId = '' } = {}) {
+export async function startRecording({ vad = false, onLevel, deviceId = '' } = {}) {
   // Rauschunterdrückung und Echo-Filter von Chromium verschlucken bei manchen Mikrofonen die Sprache (dann hört die Erkennung nur „[Musik]“).
   const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 };
   if (deviceId) audio.deviceId = { exact: deviceId };
@@ -63,40 +60,6 @@ export async function startRecording({ vad = false, onLevel, onPcm, deviceId = '
   const src = ac.createMediaStreamSource(stream);
   src.connect(an);
   const buf = new Float32Array(an.fftSize);
-  // Live-Daten: auf 16 kHz herunterrechnen, leise Stimmen behutsam anheben (sonst hört die Erkennung nur Stille)
-  let proc = null;
-  if (onPcm) {
-    proc = ac.createScriptProcessor(4096, 1, 1);
-    const mute = ac.createGain(); mute.gain.value = 0;
-    src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
-    const ratio = ac.sampleRate / 16000;
-    let carry = 0;
-    let peak = 0.0001;
-    let pending = [];
-    let pendingLen = 0;
-    proc.onaudioprocess = (e) => {
-      if (cancelled) return;
-      const x = e.inputBuffer.getChannelData(0);
-      for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a; }
-      const gain = peak > 0.002 ? Math.min(12, 0.6 / peak) : 1;
-      const out = new Int16Array(Math.floor((x.length - carry) / ratio) + 1);
-      let n = 0;
-      let pos = carry;
-      for (; pos < x.length; pos += ratio) {
-        const v = Math.max(-1, Math.min(1, x[Math.floor(pos)] * gain));
-        out[n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
-      }
-      carry = pos - x.length;
-      pending.push(out.subarray(0, n)); pendingLen += n;
-      if (pendingLen >= 4000) {
-        const all = new Int16Array(pendingLen);
-        let o = 0; for (const p of pending) { all.set(p, o); o += p.length; }
-        pending = []; pendingLen = 0;
-        onPcm(new Uint8Array(all.buffer));
-      }
-    };
-  }
-
   let spoke = false;
   let lastVoice = Date.now();
   const started = Date.now();
@@ -121,15 +84,36 @@ export async function startRecording({ vad = false, onLevel, onPcm, deviceId = '
   }, 50);
 
   rec.onstop = async () => {
+    if (ended) return;
+    stopFired = true;
     clearInterval(timer);
-    if (proc) { try { proc.disconnect(); proc.onaudioprocess = null; } catch { /* egal */ } }
     stream.getTracks().forEach((t) => t.stop());
     ac.close().catch(() => {});
-    if (cancelled || (vad && !spoke) || !chunks.length) return finish(null);
-    try { const w = await blobToWav16k(new Blob(chunks, { type: rec.mimeType })); if (lastWavPeak > handle.peak) handle.peak = lastWavPeak; finish(w); } catch { finish(null); }
+    if (cancelled || (vad && !spoke) || !chunks.length) { ended = true; return finish(null); }
+    try {
+      // Umwandeln darf nicht ewig hängen
+      const w = await Promise.race([blobToWav16k(new Blob(chunks, { type: rec.mimeType })), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeit')), 15000))]);
+      if (lastWavPeak > handle.peak) handle.peak = lastWavPeak;
+      ended = true; finish(w);
+    } catch { hardEnd(true); }
   };
-  function stop() { if (rec.state !== 'inactive') rec.stop(); }
+  // Mikrofon auf jeden Fall freigeben: endet die Aufnahme nicht binnen 4 s, wird sie hart beendet
+  let ended = false;
+  let stopFired = false;
+  const hardEnd = (force) => {
+    if (ended || (stopFired && !force)) return;
+    ended = true;
+    clearInterval(timer);
+    stream.getTracks().forEach((t) => t.stop());
+    ac.close().catch(() => {});
+    finish(null);
+  };
+  function stop() {
+    if (rec.state !== 'inactive') { try { rec.stop(); } catch { hardEnd(); } }
+    setTimeout(hardEnd, 4000);
+  }
   function cancel() { cancelled = true; stop(); }
+  rec.onerror = () => hardEnd(true);
   rec.start(250);
   const handle = { stop, cancel, done, peak: 0 };
   return handle;

@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.9
+
+- Diktat ganz einfach wie in der Claude-App: Klick startet die Aufnahme, zweiter Klick stoppt, dann wird der Satz erkannt und erscheint im Eingabefeld (orange = wird erkannt, Klick bricht ab). Das Live-Mitschreiben während des Sprechens ist entfernt – es war die Ursache der hängenden Mikrofone und des Textes, der sich nicht löschen ließ.
+- Das Mikrofon wird nach dem Stoppen in jedem Fall freigegeben.
+
 ## Neu in 2.5.8
 
 - Menü „Ansicht“: Vergrößern (⌘ +), Verkleinern (⌘ −), Originalgröße (⌘ 0) und Vollbild (⌃⌘ F, Windows F11). Die Zoomstufe bleibt nach einem Neustart erhalten. Unter Windows gehen dieselben Tasten mit Strg.
