@@ -228,7 +228,12 @@ if (!gotLock) {
     phonon = new Phonon(dataDir, bundled, (p) => send('speech:progress', p));
     voxtral = new Voxtral(dataDir, () => findServerExe(process.resourcesPath, __dirname), (p) => send('speech:progress', p));
     voxtral.onSpawn = (pid) => orphans.add(pid);
-    voxtral.onNote = (text) => { startLog(text); send('hfweb:notice', { text }); };
+    voxtral.onNote = (text, logOnly) => { startLog(text); if (!logOnly) send('hfweb:notice', { text }); };
+    // Wenig Speicher: Chat-Modell und Spracherkennung nicht gleichzeitig – sonst lagert der Rechner aus und alles dauert Minuten.
+    // Das Chat-Modell lädt beim nächsten Senden von selbst wieder.
+    voxtral.beforeStart = async () => {
+      if (LOW_MEMORY && engine && engine.child) { startLog('Chat-Modell entladen, um Speicher für die Spracherkennung freizumachen'); await engine.stop(); }
+    };
 
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       cb(permission === 'media' || permission === 'clipboard-sanitized-write');

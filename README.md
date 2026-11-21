@@ -15,6 +15,9 @@ Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
 - Diktat ganz einfach wie in der Claude-App: Klick startet die Aufnahme, zweiter Klick stoppt, dann wird der Satz erkannt und erscheint im Eingabefeld (orange = wird erkannt, Klick bricht ab). Das Live-Mitschreiben während des Sprechens ist entfernt – es war die Ursache der hängenden Mikrofone und des Textes, der sich nicht löschen ließ.
 - Das Mikrofon wird nach dem Stoppen in jedem Fall freigegeben.
+- Rechner mit bis zu 16 GB: Beim Diktieren wird das Chat-Modell kurz entladen, damit die Spracherkennung Platz hat (vorher lagerte der Rechner aus und die Erkennung dauerte Minuten). Das Chat-Modell lädt beim nächsten Senden von selbst wieder.
+- Mac: kein zweiter, langsamer Versuch auf dem Prozessor mehr nach einer Zeitüberschreitung.
+- Startprotokoll zeigt, wie lange Laden und Erkennen der Sprache dauern.
 
 ## Neu in 2.5.8
 
