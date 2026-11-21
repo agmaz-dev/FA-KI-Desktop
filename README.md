@@ -11,6 +11,11 @@ Deutsche Windows-App für lokale KI mit **eigener Engine** (llama.cpp, eingebaut
 Installer: `FA-KI-Desktop-Setup-<Version>.exe` (GitHub Actions → Releases/Artifacts).
 Entwicklung: `npm ci && npm start`, Tests: `npm test`.
 
+## Neu in 2.5.8
+
+- Menü „Ansicht“: Vergrößern (⌘ +), Verkleinern (⌘ −), Originalgröße (⌘ 0) und Vollbild (⌃⌘ F, Windows F11). Die Zoomstufe bleibt nach einem Neustart erhalten. Unter Windows gehen dieselben Tasten mit Strg.
+- Alle Menüs auf Deutsch.
+
 ## Neu in 2.5.7
 
 - Spracherkennung: großzügigeres Zeitlimit (mindestens 1 Minute), damit der erste Durchgang nach dem Start auf langsameren Rechnern nicht abbricht.

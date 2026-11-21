@@ -100,10 +100,32 @@ function createWindow() {
   });
   // Menüleiste bleibt versteckt, aber Bearbeiten-Tastenkürzel (Einfügen, Kopieren …) funktionieren.
   const menuTpl = [
-    { label: 'Bearbeiten', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+    { label: 'Bearbeiten', submenu: [{ role: 'undo', label: 'Widerrufen' }, { role: 'redo', label: 'Wiederholen' }, { type: 'separator' }, { role: 'cut', label: 'Ausschneiden' }, { role: 'copy', label: 'Kopieren' }, { role: 'paste', label: 'Einsetzen' }, { role: 'selectAll', label: 'Alles auswählen' }] },
   ];
-  if (process.platform === 'darwin') menuTpl.unshift({ role: 'appMenu' });
-  if (process.platform === 'darwin') menuTpl.push({ role: 'windowMenu' });
+  // Ansicht: Zoom (alle Schriften größer/kleiner) und Vollbild. Die Stufe bleibt nach einem Neustart erhalten.
+  const setZoom = (lvl) => {
+    if (!win || win.isDestroyed()) return;
+    const v = Math.max(-3, Math.min(5, Math.round(lvl * 2) / 2));
+    win.webContents.setZoomLevel(v);
+    store.setSettings({ zoomLevel: v });
+  };
+  const zoomBy = (d) => () => setZoom(win.webContents.getZoomLevel() + d);
+  menuTpl.push({ label: 'Ansicht', submenu: [
+    { label: 'Originalgröße', accelerator: 'CmdOrCtrl+0', click: () => setZoom(0) },
+    { label: 'Vergrößern', accelerator: 'CmdOrCtrl+Plus', click: zoomBy(0.5) },
+    { label: 'Vergrößern', accelerator: 'CmdOrCtrl+=', click: zoomBy(0.5), visible: false, acceleratorWorksWhenHidden: true },
+    { label: 'Verkleinern', accelerator: 'CmdOrCtrl+-', click: zoomBy(-0.5) },
+    { type: 'separator' },
+    { label: 'Vollbildmodus umschalten', accelerator: process.platform === 'darwin' ? 'Ctrl+Cmd+F' : 'F11', click: () => { if (win && !win.isDestroyed()) win.setFullScreen(!win.isFullScreen()); } },
+  ] });
+  if (process.platform === 'darwin') {
+    menuTpl.unshift({ label: app.name, submenu: [
+      { role: 'about', label: 'Über FA KI Desktop' }, { type: 'separator' },
+      { role: 'hide', label: 'FA KI Desktop ausblenden' }, { role: 'hideOthers', label: 'Andere ausblenden' }, { role: 'unhide', label: 'Alle einblenden' },
+      { type: 'separator' }, { role: 'quit', label: 'FA KI Desktop beenden' },
+    ] });
+  }
+  if (process.platform === 'darwin') menuTpl.push({ label: 'Fenster', submenu: [{ role: 'minimize', label: 'Im Dock ablegen' }, { role: 'zoom', label: 'Zoomen' }, { type: 'separator' }, { role: 'front', label: 'Alle nach vorne bringen' }] });
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTpl));
   win.setMenuBarVisibility(false);
   // Electron 45: clipboard.readImage gibt es nicht mehr, die Zwischenablage liefert ClipboardItems (async).
@@ -134,6 +156,8 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'build', 'renderer', 'index.html'));
   win.webContents.on('did-finish-load', () => {
     startLog('Fenster geladen');
+    const z = Number(store.getSettings().zoomLevel) || 0;
+    if (z) win.webContents.setZoomLevel(z);
     // Für den Test in der CI: Fenster ist da -> melden und beenden
     if (process.env.FA_SMOKE) setTimeout(() => {
       win.webContents.executeJavaScript('document.querySelectorAll("#app").length + ":" + (document.getElementById("input") ? 1 : 0)')
@@ -430,7 +454,13 @@ function registerIpc() {
   ipcMain.handle('agent:clearDir', () => publicSettings(store.setSettings({ agentDir: '' })));
   ipcMain.handle('agent:check', () => agent.checkTools());
   ipcMain.handle('agent:openDir', () => { const d = store.getSettings().agentDir; return d ? shell.openPath(d) : ''; });
-  ipcMain.handle('hfweb:bounds', (_e, { rect, visible }) => { hfweb.setBounds(rect || {}, !!visible); return true; });
+  ipcMain.handle('hfweb:bounds', (_e, { rect, visible }) => {
+    // Die Oberfläche misst in CSS-Pixeln; bei Zoom muss das in Fensterpunkte umgerechnet werden
+    const f = win && !win.isDestroyed() ? win.webContents.getZoomFactor() : 1;
+    const r = rect || {};
+    hfweb.setBounds({ x: (r.x || 0) * f, y: (r.y || 0) * f, width: (r.width || 0) * f, height: (r.height || 0) * f }, !!visible);
+    return true;
+  });
   ipcMain.handle('hfweb:nav', (_e, { what, url }) => { hfweb.nav(String(what), url ? String(url) : ''); return true; });
   ipcMain.handle('hf:search', (_e, { query, sort, next }) => hf.search(query, { sort, next }));
   ipcMain.handle('hf:details', (_e, id) => hf.details(id, hf.hwFor(store.getSettings(), process.platform, os.totalmem())));
