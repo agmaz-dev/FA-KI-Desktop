@@ -4,8 +4,9 @@ import { readPdf, prepareImage, isPdf, isImage } from './docs.js';
 import { startRecording, speak, stopSpeaking } from './audio.js';
 import { fitText, formatBytes } from '../lib/util.js';
 import { buildThink } from '../lib/think.js';
-import { $, el, icon, iconButton, applyIcons, openModal, closeModal, newId } from './ui.js';
+import { $, el, icon, iconButton, applyIcons, newId } from './ui.js';
 import { openSettings, profilePrompt } from './settings.js';
+import { mountExplore, mountLibrary } from './models.js';
 
 const api = window.api;
 
@@ -44,14 +45,16 @@ function newChat() {
 }
 
 // ---------- Aussehen ----------
-const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 function applyAppearance(s) {
-  const theme = s.theme === 'system' ? (darkQuery.matches ? 'dark' : 'light') : s.theme;
+  const theme = s.theme === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.setProperty('--fs', (s.fontSize || 16) + 'px');
-  document.body.classList.toggle('serif', !!s.serif);
+  const stack = (name, fallback) => { const n = String(name || '').replace(/["';{}<>\\]/g, '').trim(); return n ? `"${n}", ${fallback}` : fallback; };
+  const root = document.documentElement.style;
+  root.setProperty('--font-sans', stack(s.fontUi, '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif'));
+  document.documentElement.classList.toggle('no-tokens', s.showTokens === false);
+  root.setProperty('--font-answer', stack(s.fontAnswer, 'Georgia, serif'));
 }
-darkQuery.addEventListener('change', () => applyAppearance(state.settings));
 
 // ---------- Hinweise / Fortschritt ----------
 let hintTimer = null;
@@ -74,19 +77,121 @@ api.speech.onProgress((p) => {
   showProgress((p.label || 'Download') + extra, p.pct);
 });
 
+// ---------- Seitenfenster: Browser und Vorschau neben dem Chat ----------
+const panelSt = { open: false, mode: '', canBack: false, canForward: false };
+function panelWidth() {
+  let w = 520;
+  try { w = parseInt(localStorage.getItem('fa.panelW'), 10) || 520; } catch { /* egal */ }
+  return Math.min(Math.max(w, 320), Math.max(360, window.innerWidth - 560));
+}
+function panelSync() {
+  const chat = !$('viewChat').classList.contains('hidden');
+  const show = panelSt.open && chat;
+  $('panel').classList.toggle('hidden', !show);
+  $('panelSplit').classList.toggle('hidden', !show);
+  if (show) $('panel').style.setProperty('--panelw', panelWidth() + 'px');
+  const r = $('panelBody').getBoundingClientRect();
+  api.panel.bounds({ rect: { x: r.x, y: r.y, width: r.width, height: r.height }, visible: show });
+}
+function panelShow() { panelSt.open = true; panelSync(); requestAnimationFrame(panelSync); }
+async function openPanelUrl(url) { panelShow(); try { await api.panel.openUrl(url); } catch (e) { hint(cleanErr(e), 0); } }
+async function openPanelHtml(html, title) { panelShow(); try { await api.panel.html({ html, title }); } catch (e) { hint(cleanErr(e), 0); } }
+function cleanErr(e) { return String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+/** Holt ein vollständiges HTML-Dokument aus einer Antwort (```html-Block oder Dokument im Codeblock). */
+let liveHtmlAt = 0; let liveHtmlLen = 0;
+function extractHtml(md) {
+  const re = /```[a-zA-Z]*\s*\n([\s\S]*?)```/g;
+  let m; let best = '';
+  while ((m = re.exec(md || ''))) if (/^\s*(<!doctype html|<html)/i.test(m[1])) best = m[1];
+  return best;
+}
+function initPanel() {
+  api.panel.onState((s) => {
+    panelSt.open = !!s.open; panelSt.mode = s.mode || ''; panelSt.canBack = !!s.canBack; panelSt.canForward = !!s.canForward;
+    const tabsEl = $('pTabs'); tabsEl.textContent = '';
+    (s.tabs || []).forEach((t) => {
+      const b = document.createElement('div'); b.className = 'ptab' + (t.id === s.active ? ' on' : ''); b.title = t.title;
+      const tt = document.createElement('span'); tt.className = 't'; tt.textContent = t.title;
+      const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Tab schließen';
+      x.onclick = (ev) => { ev.stopPropagation(); api.panel.closeTab(t.id); };
+      b.onclick = () => api.panel.selectTab(t.id);
+      b.append(tt, x); tabsEl.appendChild(b);
+    });
+    const plus = document.createElement('button'); plus.className = 'ptab-new'; plus.textContent = '+'; plus.title = 'Neuer Tab';
+    plus.onclick = () => { api.panel.newTab(''); setTimeout(() => $('pUrl').focus(), 120); };
+    tabsEl.appendChild(plus);
+    const web = s.mode !== 'html';
+    $('pTitle').classList.toggle('hidden', web); $('pUrl').classList.toggle('hidden', !web);
+    $('pTitle').textContent = s.open && !web ? (s.title || '') : '';
+    if (web && document.activeElement !== $('pUrl')) $('pUrl').value = s.url && s.url !== 'about:blank' ? s.url : '';
+    $('pBack').disabled = !s.canBack; $('pFwd').disabled = !s.canForward;
+    $('pReload').classList.toggle('hidden', s.mode === 'html');
+    $('pBack').classList.toggle('hidden', s.mode === 'html'); $('pFwd').classList.toggle('hidden', s.mode === 'html');
+    $('pExt').classList.toggle('hidden', s.mode === 'html');
+    panelSync();
+  });
+  const goUrl = () => {
+    let v = $('pUrl').value.trim(); if (!v) return;
+    if (!/^https?:\/\//i.test(v)) v = /^[^\s]+\.[a-z]{2,}([\/?#:].*)?$/i.test(v) ? 'https://' + v : 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
+    openPanelUrl(v); $('pUrl').blur();
+  };
+  $('pUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') goUrl(); });
+  $('pUrl').addEventListener('focus', () => $('pUrl').select());
+  $('btnBrowser').onclick = () => { if (panelSt.open && panelSt.mode === 'web') { $('pUrl').focus(); return; } panelShow(); openPanelUrl('https://duckduckgo.com/'); setTimeout(() => $('pUrl').focus(), 150); };
+  $('pBack').onclick = () => api.panel.nav('back');
+  $('pFwd').onclick = () => api.panel.nav('forward');
+  $('pReload').onclick = () => api.panel.nav('reload');
+  $('pExt').onclick = () => api.panel.external();
+  $('pClose').onclick = () => { panelSt.open = false; api.panel.close(); panelSync(); };
+  $('pPdf').onclick = async () => { try { const p = await api.panel.pdf(); if (p) hint('Gespeichert: ' + p); } catch (e) { hint(cleanErr(e), 0); } };
+  const split = $('panelSplit');
+  split.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); split.setPointerCapture(e.pointerId); split.classList.add('drag');
+    const x0 = e.clientX; const w0 = panelWidth();
+    const mv = (ev) => {
+      const w = Math.min(Math.max(w0 + (x0 - ev.clientX), 320), Math.max(360, window.innerWidth - 560));
+      $('panel').style.setProperty('--panelw', w + 'px');
+      try { localStorage.setItem('fa.panelW', String(Math.round(w))); } catch { /* egal */ }
+      panelSync();
+    };
+    const up = () => { split.classList.remove('drag'); split.removeEventListener('pointermove', mv); split.removeEventListener('pointerup', up); };
+    split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
+  });
+  new ResizeObserver(panelSync).observe($('panelBody'));
+  window.addEventListener('resize', panelSync);
+}
+
+// ---------- Auslastung (GPU, CPU, RAM) ----------
+function setMeter(id, pct, text) {
+  $('m' + id).style.width = (pct == null ? 0 : pct) + '%';
+  $('m' + id + 'T').textContent = text;
+}
+function startMeters() {
+  const tick = async () => {
+    try {
+      const s = await api.sys.stats();
+      setMeter('Gpu', s.gpu, s.gpu == null ? '–' : s.gpu + ' %');
+      setMeter('Cpu', s.cpu, s.cpu + ' %');
+      setMeter('Ram', Math.round((s.ramUsed / s.ramTotal) * 100), formatBytes(s.ramUsed));
+    } catch { /* egal */ }
+  };
+  tick();
+  setInterval(tick, 2000);
+}
+
 // ---------- Status & Modelle ----------
 async function refreshStatus() {
-  const s = await api.ollama.status();
+  const s = await api.models.status();
   const box = $('status');
   box.classList.toggle('ok', s.ok);
   box.classList.toggle('bad', !s.ok);
-  $('statusText').textContent = s.ok ? `Ollama ${s.version} läuft lokal` : 'Ollama nicht erreichbar';
-  if (!s.ok) hint('Ollama ist nicht erreichbar. Die App versucht es zu starten; sonst bitte die Ollama-App öffnen.', 0);
+  $('statusText').textContent = s.ok ? `Eigene Engine ${s.version || ''} · alles lokal`.replace('  ', ' ') : 'Engine fehlt';
+  if (!s.ok) hint(s.error || 'Die Rechen-Engine fehlt.', 0);
   return s.ok;
 }
 
 async function loadModels() {
-  try { state.models = await api.ollama.models(); } catch { state.models = []; }
+  try { state.models = await api.models.list(); } catch { state.models = []; }
   const sel = $('modelSel');
   sel.innerHTML = '';
   const visible = state.models.filter((m) => state.settings.showCloud || !m.remote);
@@ -101,13 +206,39 @@ async function loadModels() {
   if (visible.some((m) => m.name === want)) sel.value = want;
   else if (visible.length) sel.value = visible[0].name;
   await onModelChanged(false);
+  renderModelMenu();
+}
+
+// ---------- Modell-Auswahl in der Eingabeleiste ----------
+function renderModelMenu() {
+  const name = $('modelSel').value;
+  $('modelBtnText').textContent = name || 'Kein Modell';
+  const f = $('modelFilter').value.trim().toLowerCase();
+  const box = $('modelList');
+  box.innerHTML = '';
+  const visible = state.models.filter((m) => (state.settings.showCloud || !m.remote) && (!f || m.name.toLowerCase().includes(f)));
+  if (!visible.length) box.appendChild(el('div', 'note menu-note', state.models.length ? 'Kein Treffer.' : 'Noch kein Modell installiert.'));
+  for (const m of visible) {
+    const b = el('button', 'model-item' + (m.name === name ? ' active' : ''));
+    b.type = 'button';
+    b.appendChild(el('span', 'mi-name', m.name + (m.remote ? ' (Cloud!)' : '')));
+    b.appendChild(el('span', 'mi-size', m.size ? formatBytes(m.size) : 'Cloud'));
+    b.onclick = async () => {
+      $('modelSel').value = m.name;
+      closeMenus();
+      renderModelMenu();
+      await onModelChanged(true);
+      updateCtxInfo();
+    };
+    box.appendChild(b);
+  }
 }
 
 async function getCaps(name) {
   if (!name) return [];
   if (!state.caps[name]) {
-    // Fehler (z. B. Ollama startet noch) nicht merken, sonst bleiben Denken/Bilder bis zum Neustart aus.
-    try { state.caps[name] = (await api.ollama.show(name)).capabilities || []; } catch { return []; }
+    // Fehler (z. B. Engine startet noch) nicht merken, sonst bleiben Denken/Bilder bis zum Neustart aus.
+    try { state.caps[name] = (await api.models.show(name)).capabilities || []; } catch { return []; }
   }
   return state.caps[name];
 }
@@ -115,7 +246,7 @@ async function getCaps(name) {
 async function onModelChanged(save = true) {
   const name = $('modelSel').value;
   const caps = await getCaps(name);
-  $('thinkField').style.display = caps.includes('thinking') ? '' : 'none';
+  $('thinkField').classList.toggle('hidden', !caps.includes('thinking'));
   const thinkSel = $('thinkSel');
   const prev = thinkSel.value;
   thinkSel.innerHTML = '';
@@ -126,6 +257,7 @@ async function onModelChanged(save = true) {
   thinkSel.value = opts.some(([v]) => v === keep) ? keep : (three ? 'medium' : 'on');
   if (state.chat) state.chat.model = name;
   if (save && name) state.settings = await api.settings.set({ model: name });
+  $('modelBtnText').textContent = name || 'Kein Modell';
 }
 
 // ---------- Profile ----------
@@ -226,6 +358,7 @@ async function openChat(id) {
 
 // ---------- Nachrichten anzeigen ----------
 function renderAll() {
+  updateCtxInfo();
   const box = $('messages');
   box.innerHTML = '';
   updateTitle();
@@ -240,7 +373,7 @@ function renderAll() {
 }
 function makeEmpty() {
   const d = el('div', 'empty'); d.id = 'empty';
-  d.innerHTML = '<div class="logo big">FA</div><h1 id="greeting"></h1><p>Alles läuft lokal auf diesem PC.</p>';
+  d.innerHTML = '<img class="logo-img big" src="logo.svg" alt=""><h1 id="greeting"></h1><p>Alles läuft lokal auf diesem Rechner.</p>';
   return d;
 }
 
@@ -271,36 +404,56 @@ function fillMsg(wrap, m, live = false, isLast = false) {
   }
   if (m.thinking) {
     const d = el('details', 'think');
-    const open = wrap._thinkOpen !== undefined ? wrap._thinkOpen : !!(live && state.settings.thinkLive);
+    const open = !!wrap._thinkOpen; // immer zu, außer Du klickst darauf
     d.open = open;
     d.addEventListener('toggle', () => { wrap._thinkOpen = d.open; });
-    let label = 'Gedankengang anzeigen';
+    let label = 'Gedanken';
     if (live && !m.content) {
       if (!m._t0) m._t0 = Date.now();
       label = `Denkt nach … (${Math.round((Date.now() - m._t0) / 1000)} s)`;
     }
     d.appendChild(el('summary', null, label));
-    const tt = el('div', 'tt', m.thinking);
+    const tt = el('div', 'tt', String(m.thinking).replace(/<\/?think>/gi, ''));
     d.appendChild(tt);
     body.appendChild(d);
     if (open && live) requestAnimationFrame(() => { tt.scrollTop = tt.scrollHeight; });
   }
   if (m.tools && m.tools.length) {
-    const tl = el('div', 'chips');
-    for (const t of m.tools) { const c = el('span', 'chip'); c.appendChild(document.createTextNode(t)); tl.appendChild(c); }
+    const tl = el('details', 'think toolfold');
+    tl.appendChild(el('summary', null, m.tools.length === 1 ? '1 Werkzeug-Aktion' : m.tools.length + ' Werkzeug-Aktionen'));
+    tl.appendChild(el('div', 'tt', m.tools.join('\n')));
     body.appendChild(tl);
   }
   const md = el('div', 'md');
   md.innerHTML = renderMd(m.content);
   md.querySelectorAll('pre').forEach((pre) => {
+    const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+    if (/^\s*(<!doctype html|<html)/i.test(code)) {
+      // Ganze Webseiten/Folien: kein Code im Chat, nur eine kleine Karte; die Seite läuft rechts in der Vorschau.
+      const card = el('div', 'htmlcard');
+      card.appendChild(el('span', 'hc-t', live && !m.error ? 'Seite wird erstellt …' : 'Webseite / Folien'));
+      const pv = el('button', 'btn small', 'Vorschau öffnen');
+      pv.onclick = () => openPanelHtml(code, 'Vorschau');
+      const cp = el('button', 'btn small', 'Code kopieren');
+      cp.onclick = () => { navigator.clipboard.writeText(code); cp.textContent = 'Kopiert ✓'; setTimeout(() => { cp.textContent = 'Code kopieren'; }, 1500); };
+      card.append(pv, cp);
+      pre.replaceWith(card);
+      if (live && Date.now() - (liveHtmlAt || 0) > 2500 && code.length > (liveHtmlLen || 0) + 200) { liveHtmlAt = Date.now(); liveHtmlLen = code.length; openPanelHtml(code, 'Vorschau'); }
+      return;
+    }
     const b = el('button', 'copybtn', 'Kopieren');
     b.onclick = () => {
-      navigator.clipboard.writeText(pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText);
+      navigator.clipboard.writeText(code);
       b.textContent = 'Kopiert ✓'; setTimeout(() => { b.textContent = 'Kopieren'; }, 1500);
     };
     pre.appendChild(b);
   });
-  md.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noreferrer'; });
+  md.querySelectorAll('a').forEach((a) => {
+    a.target = '_blank'; a.rel = 'noreferrer';
+    a.addEventListener('click', (e) => {
+      if (/^https?:\/\//i.test(a.href) && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); openPanelUrl(a.href); }
+    });
+  });
   body.appendChild(md);
   if (m.error) body.appendChild(el('div', 'err', m.error));
   if (m.stats && m.stats.evalCount && m.stats.evalDuration) {
@@ -335,6 +488,7 @@ function setBusy(on) {
 function systemText() {
   const s = state.settings;
   const parts = ['Du bist "FA KI", der persönliche KI-Assistent in der Desktop-App "FA KI Desktop". Du läufst lokal auf dem Computer des Nutzers; seine Daten verlassen den Computer nicht. Wenn jemand fragt, wer du bist, sage das und nenne dich nicht ChatGPT, Claude oder anders.'];
+  parts.push('Soll etwas gezeigt werden (Webseite, Folien, Grafik, Tabelle, Entwurf), schreibe ein vollständiges, eigenständiges HTML-Dokument in genau einem ```html-Block: alles inline (CSS und JavaScript im Dokument), keine Bilder oder Dateien aus dem Internet. Es erscheint sofort als Vorschau rechts neben dem Chat. Folien: jede Folie ein <section> in 16:9 (1280×720), @page{size:1280px 720px;margin:0}, page-break-after:always, Wechsel mit den Pfeiltasten. Danach höchstens zwei Sätze Erklärung.');
   if (s.systemPrompt && s.systemPrompt.trim()) parts.push(s.systemPrompt.trim());
   const pp = profilePrompt(activeProfile());
   if (pp) parts.push(pp);
@@ -342,15 +496,28 @@ function systemText() {
 }
 
 /**
- * Baut den Verlauf für Ollama und hält ihn innerhalb der Kontextlänge:
+ * Baut den Verlauf für die Engine und hält ihn innerhalb der Kontextlänge:
  * Dateien und Bilder gehen nur mit der neuesten Nachricht vollständig mit, ältere werden gekürzt,
  * und die ältesten Runden fallen weg, wenn das Zeichenbudget (≈ num_ctx × 2,6) überschritten wird.
  */
+/** Zeichen pro Token: aus der letzten Antwort gemessen (Code, Emojis, Türkisch brauchen mehr Tokens), sonst 2,6. */
+function charsPerToken() {
+  const msgs = (state.chat && state.chat.messages) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const st = msgs[i].stats;
+    if (msgs[i].role === 'assistant' && st && st.promptCount > 500 && st.sentChars) return Math.min(4, Math.max(1.5, st.sentChars / st.promptCount));
+  }
+  return 2.6;
+}
+
 function buildOllamaMessages() {
   const sys = systemText();
   const all = state.chat.messages.filter((m) => m.role !== 'assistant' || m.content);
   const lastUser = all.map((m) => m.role).lastIndexOf('user');
-  const budget = Math.max(6000, Math.floor(state.settings.numCtx * 2.6) - 2000) - (sys ? sys.length : 0);
+  // Platz für die Antwort (samt „Gedanken“) freihalten, sonst bricht die Engine bei vollem Kontext ohne Antwort ab
+  const numCtx = state.settings.numCtx;
+  const reserve = Math.min(8000, Math.max(2048, Math.floor(numCtx * 0.35)));
+  const budget = Math.max(4000, Math.floor((numCtx - reserve - 500) * charsPerToken())) - (sys ? sys.length : 0);
   const out = [];
   let used = 0;
   for (let i = all.length - 1; i >= 0; i--) {
@@ -368,6 +535,7 @@ function buildOllamaMessages() {
     out.unshift(o);
   }
   if (sys) out.unshift({ role: 'system', content: sys });
+  state.lastSentChars = out.reduce((t, m) => t + (m.content || '').length, 0);
   return out;
 }
 
@@ -376,7 +544,7 @@ async function send() {
   const text = $('input').value.trim();
   if (!text && !state.pending.length) return;
   const model = $('modelSel').value;
-  if (!model) return hint('Bitte zuerst ein Modell installieren (links unten „Modelle verwalten“).');
+  if (!model) { hint('Bitte zuerst ein Modell laden (Modelle).'); return showView('settings', 'explore'); }
   if (!(await refreshStatus())) return;
   stopAllSpeech();
   if (!state.chat) state.chat = newChat();
@@ -434,16 +602,14 @@ async function runAssistant() {
   state.streaming = { id, asst, wrap };
   setBusy(true);
   const think = buildThink(model, caps, $('thinkSel').value);
-  const ka = state.settings.keepAlive;
   const body = {
     model,
     messages: history,
     options: { num_ctx: state.settings.numCtx, temperature: state.settings.temperature },
-    keep_alive: ka === '-1' ? -1 : ka,
   };
   if (think !== undefined) body.think = think;
-  const useTools = caps.includes('tools') && (state.settings.webTools !== false || state.settings.githubTools !== false);
-  api.chat.start({ id, body, useTools });
+  const useTools = caps.includes('tools');
+  api.chat.start({ id, chatId: state.chat.id, body, useTools });
   api.chats.save(state.chat);
 }
 
@@ -491,101 +657,176 @@ async function finishStream(id, extra) {
   Object.assign(s.asst, extra || {});
   state.streaming = null;
   setBusy(false);
-  if (!s.asst.content && !s.asst.thinking && !s.asst.error) s.asst.content = '_(keine Antwort erhalten)_';
+  if (!s.asst.content && !s.asst.error) {
+    const st = s.asst.stats || {};
+    const full = st.doneReason === 'length' || (st.promptCount && st.promptCount + (st.evalCount || 0) >= state.settings.numCtx - 64);
+    if (full) s.asst.error = 'Der Kontext war voll, bevor eine Antwort kam. Ich kürze ab jetzt ältere Nachrichten stärker – bitte einfach nochmal senden (oder einen neuen Chat beginnen).';
+    else if (!s.asst.thinking) s.asst.content = '_(keine Antwort erhalten)_';
+  }
   state.chat.updated = Date.now();
   fillMsg(s.wrap, s.asst, false, true);
+  if (s.asst.content && !s.asst.error && !(extra && extra.aborted)) { const h = extractHtml(s.asst.content); if (h) openPanelHtml(h, 'Vorschau'); }
+  liveHtmlLen = 0; liveHtmlAt = 0;
+  updateCtxInfo();
   await api.chats.save(state.chat);
   await refreshChats();
   if ((state.settings.ttsAuto || state.conv) && s.asst.content && !s.asst.error && !(extra && extra.aborted)) await speakNow(s.asst.content);
   if (state.conv) convListen();
 }
-api.chat.onDone(({ id, stats, aborted }) => finishStream(id, { stats, aborted }));
+api.chat.onDone(({ id, stats, aborted }) => finishStream(id, { stats: stats ? { ...stats, sentChars: state.lastSentChars || 0 } : stats, aborted }));
 api.chat.onError(({ id, error }) => finishStream(id, { error }));
 
 // ---------- Vorlesen ----------
 async function speakNow(text, settingsOverride) {
   const s = settingsOverride || state.settings;
   try {
-    state.speechStatus = await api.speech.status();
     await speak(text, {
-      voicePref: s.ttsVoice,
-      speechStatus: state.speechStatus,
+      voicePref: 'auto',
       speed: s.ttsSpeed || 1,
-      engine: s.ttsEngine || 'piper',
-      serverLangs: s.ttsEngine === 'supertonic' ? 'all' : (s.ttsServerLangs || 'all'),
-      onWarn: (m) => hint((s.ttsEngine === 'supertonic' ? 'Supertonic ist gerade nicht bereit' : 'Meine Stimme (OuteTTS) ist gerade nicht bereit') + ', es spricht Piper bzw. die Windows-Stimme: ' + m, 0),
-      onState: (on) => { state.speaking = on; $('btnStopSpeak').classList.toggle('hidden', !on); },
+      engine: s.ttsEngine === 'server' ? 'server' : 'phonon',
+      onWarn: (m) => hint((s.ttsEngine === 'server' ? 'Meine Stimme (OuteTTS)' : 'Phonon') + ' ist gerade nicht bereit, es spricht die System-Stimme: ' + m, 0),
+      onState: (on) => { state.speaking = on; renderMic(); },
     });
   } catch (e) { hint('Vorlesen fehlgeschlagen: ' + (e.message || e)); }
 }
 function stopAllSpeech() {
   stopSpeaking();
   state.speaking = false;
-  $('btnStopSpeak').classList.add('hidden');
+  renderMic();
 }
 
 function renderTtsButton() {
   const b = $('btnTts');
   b.classList.toggle('on', !!state.settings.ttsAuto);
-  b.innerHTML = icon(state.settings.ttsAuto ? 'speaker' : 'speakerOff');
-  b.title = state.settings.ttsAuto ? 'Antworten werden automatisch vorgelesen (Klick zum Ausschalten)' : 'Antworten automatisch vorlesen';
+  b.querySelector('[data-icon]').innerHTML = icon(state.settings.ttsAuto ? 'speaker' : 'speakerOff', 16);
+  $('ttsLabel').textContent = state.settings.ttsAuto ? 'Automatisches Vorlesen ist an (Klick: aus)' : 'Antworten automatisch vorlesen';
 }
 
-// ---------- Mikrofon ----------
+// ---------- Mikrofon: ein Knopf für alles ----------
+// Liest die KI vor: Klick stoppt das Vorlesen sofort und hört zu. Hört die App zu: Klick beendet die Aufnahme.
+function renderMic() {
+  const b = $('btnMic');
+  const recOn = !!state.rec;
+  const busy = !recOn && !!micBusy;
+  b.classList.toggle('rec', recOn);
+  b.classList.toggle('busy', busy);
+  b.classList.toggle('speaking', !recOn && !busy && !!state.speaking);
+  b.innerHTML = icon(recOn || busy ? 'stop' : state.speaking ? 'speaker' : 'mic', 17);
+  b.title = recOn ? 'Aufnahme beenden' : busy ? 'Erkennung läuft – klicken zum Abbrechen' : state.speaking ? 'Vorlesen unterbrechen und zuhören' : 'Diktieren';
+  b.setAttribute('aria-label', b.title);
+  $('composer').classList.toggle('dictating', recOn);
+  $('wave').classList.toggle('hidden', !recOn);
+}
+
+// Wellenform nach der echten Stimme: neue Balken kommen rechts dazu und wandern nach links
+const WAVE_N = 26;
+let waveLevels = [];
+function waveReset() {
+  waveLevels = new Array(WAVE_N).fill(0);
+  const w = $('wave');
+  w.innerHTML = '';
+  for (let i = 0; i < WAVE_N; i++) w.appendChild(document.createElement('i'));
+}
+function wavePush(rms) {
+  waveLevels.push(Math.min(1, Math.sqrt(rms) * 3.2));
+  waveLevels.shift();
+  const bars = $('wave').children;
+  for (let i = 0; i < bars.length; i++) bars[i].style.height = Math.max(3, Math.round(waveLevels[i] * 24)) + 'px';
+}
+
 async function ensureStt() {
   const st = await api.speech.status();
-  const model = state.settings.sttModel;
-  if (st.whisperBinary && st.whisperModels[model]) return true;
-  if (!confirm(`Für die Spracheingabe muss einmalig ein lokales Spracherkennungs-Modell geladen werden (ca. ${st.info.whisperModels[model].approx}). Jetzt laden?`)) return false;
-  try {
-    showProgress('Spracherkennung wird eingerichtet', null);
-    await api.speech.prepareStt(model);
-    hideProgress();
-    return true;
-  } catch (e) {
-    hideProgress();
-    hint('Spracherkennung konnte nicht eingerichtet werden: ' + (e.message || e), 0);
-    return false;
-  }
+  if (st.voxtral && st.voxtral.ready) return true;
+  if (!confirm(`Zum Diktieren wird einmalig Voxtral geladen (ca. ${(st.voxtral && st.voxtral.approx) || '3,6 GB'}). Jetzt laden?`)) return false;
+  showProgress('Voxtral wird geladen', null);
+  const r = await api.voxtral.setup();
+  hideProgress();
+  if (!r.ok) { hint('Voxtral konnte nicht eingerichtet werden: ' + r.error, 0); return false; }
+  return true;
 }
 
 async function transcribeWav(wav) {
   if (!wav) { hint('Es wurde nichts gesprochen.'); return ''; }
   showProgress('Sprache wird erkannt', null);
-  try { return await api.speech.transcribe({ wav, lang: state.settings.sttLang, model: state.settings.sttModel }); }
+  try { return await api.speech.transcribe({ wav }); }
   catch (e) { hint('Erkennung fehlgeschlagen: ' + (e.message || e), 0); return ''; }
   finally { hideProgress(); }
 }
 
+// Diktat wie in der Claude-App: Klick = Aufnahme starten, Klick = stoppen, dann wird der ganze Satz erkannt.
+// Genau ein Lauf zur Zeit; ein abgebrochener Lauf schreibt nie ins Eingabefeld.
+let micRun = 0;
+let micBusy = null; // solange nach dem Stopp erkannt wird (Knopf orange, Klick bricht ab)
+
+function cancelMicBusy() {
+  if (!micBusy) return;
+  micRun++;
+  micBusy = null;
+  hideProgress();
+  renderMic();
+  hint('Diktat abgebrochen.');
+}
+
 async function toggleMic() {
   if (state.rec) { state.rec.stop(); return; }
-  if (!(await ensureStt())) return;
-  api.speech.warmStt(state.settings.sttModel).catch(() => {}); // Modell lädt, während gesprochen wird
-  try { stopAllSpeech(); state.rec = await startRecording({ vad: false }); }
-  catch (e) { return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
-  $('btnMic').classList.add('rec');
-  hint('Aufnahme läuft … nochmal auf das Mikrofon klicken zum Beenden.', 0);
-  const wav = await state.rec.done;
-  state.rec = null;
-  $('btnMic').classList.remove('rec');
-  hint('');
-  const t = await transcribeWav(wav);
-  if (t) {
-    const cur = $('input').value;
-    $('input').value = (cur ? cur + ' ' : '') + t;
-    autosize();
-    if (state.settings.autoSend) send();
+  if (micBusy) { cancelMicBusy(); return; }
+  // Im Gesprächsmodus: Klick während des Vorlesens unterbricht die KI, dann sofort zuhören
+  if (state.conv) { stopAllSpeech(); convListen(); return; }
+  stopAllSpeech();
+  const run = ++micRun;
+  const cur = () => run === micRun;
+  micBusy = { run };
+  renderMic();
+  const ok = await ensureStt().catch(() => false);
+  if (!cur()) return;
+  micBusy = null;
+  if (!ok) { renderMic(); return; }
+  api.speech.warmStt().catch(() => {}); // Erkennung schon während des Sprechens laden
+  waveReset();
+  let rec;
+  try {
+    rec = await startRecording({ vad: false, deviceId: state.settings.micId, onLevel: wavePush });
+  } catch (e) {
+    renderMic();
+    return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0);
   }
+  if (!cur()) { rec.cancel(); return; }
+  state.rec = rec;
+  renderMic();
+  const wav = await rec.done;
+  state.rec = null;
+  if (!cur()) { renderMic(); return; }
+  if (!wav || rec.peak < 0.006) {
+    renderMic();
+    return hint(wav ? 'Das Mikrofon liefert fast nur Stille. Wähle unter Einstellungen → Sprache das richtige Mikrofon.' : 'Es wurde nichts aufgenommen.', 0);
+  }
+  micBusy = { run };
+  renderMic();
+  const t = await transcribeWav(wav);
+  if (!cur()) return;
+  micBusy = null;
+  renderMic();
+  if (!t) return;
+  const input = $('input');
+  input.value = (input.value.trim() ? input.value.replace(/\s+$/, '') + ' ' : '') + t;
+  autosize();
+  input.focus();
+  if (state.settings.autoSend) send();
 }
 
 async function convListen() {
-  if (!state.conv || state.rec || state.streaming) return;
-  api.speech.warmStt(state.settings.sttModel).catch(() => {});
-  try { state.rec = await startRecording({ vad: true }); }
-  catch (e) { state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  // „listening“ wird sofort gesetzt: sonst könnten Mikrofon-Klick und Ende des Vorlesens zwei Aufnahmen starten
+  if (!state.conv || state.rec || state.listening || state.streaming) return;
+  state.listening = true;
+  waveReset();
+  try { state.rec = await startRecording({ vad: true, deviceId: state.settings.micId, onLevel: wavePush }); }
+  catch (e) { state.listening = false; state.conv = false; $('btnConv').classList.remove('rec'); return hint('Mikrofon nicht verfügbar: ' + (e.message || e), 0); }
+  renderMic();
   hint('Ich höre zu … sprich einfach.', 0);
   const wav = await state.rec.done;
   state.rec = null;
+  state.listening = false;
+  renderMic();
   if (!state.conv) return;
   if (!wav) return convListen();
   hint('');
@@ -603,6 +844,7 @@ async function toggleConv() {
     return;
   }
   if (!(await ensureStt())) return;
+  api.speech.warmStt().catch(() => {});
   state.conv = true;
   $('btnConv').classList.add('rec');
   convListen();
@@ -662,78 +904,154 @@ async function pickFiles() {
   for (const f of await api.files.pick()) await addFile(f.name, f.data);
 }
 
-// ---------- Modelle-Dialog ----------
-async function openModels() {
-  const render = async (m) => {
-    m.innerHTML = '';
-    m.appendChild(el('h2', null, 'Modelle verwalten'));
-    let list = [];
-    try { list = await api.ollama.models(); } catch { m.appendChild(el('div', 'err', 'Ollama nicht erreichbar.')); }
-    m.appendChild(el('h3', null, 'Installiert'));
-    if (!list.length) m.appendChild(el('div', 'note', 'Noch keine Modelle installiert.'));
-    for (const x of list) {
-      const r = el('div', 'list-row');
-      const g = el('div', 'grow'); g.appendChild(el('div', null, x.name));
-      g.appendChild(el('div', 'sub', (x.size ? formatBytes(x.size) : 'Cloud') + (x.details.parameter_size ? ' · ' + x.details.parameter_size : '')));
-      r.appendChild(g);
-      if (x.remote) r.appendChild(el('span', 'badge warn', 'Cloud – nicht lokal'));
-      const d = el('button', 'btn small danger', 'Löschen');
-      d.onclick = async () => {
-        if (!confirm(`Modell „${x.name}“ löschen?`)) return;
-        await api.ollama.remove(x.name); await loadModels(); render(m);
-      };
-      r.appendChild(d);
-      m.appendChild(r);
+// ---------- Seiten: Chat und Einstellungen (Erkunden und Bibliothek liegen darin) ----------
+// Download-Verwaltung: gilt für die ganze App. Bis zu 3 laufen gleichzeitig, weitere warten (Hauptprozess).
+// dls: Name -> { name, state: queued|running|done|cancelled|error, status, completed, total, error }
+const dls = new Map();
+const dlListeners = new Set();
+function dlEmit() { for (const f of [...dlListeners]) f(dls); }
+function dlOn(f) { dlListeners.add(f); return () => dlListeners.delete(f); }
+function dlPercent(d) { return d && d.total ? Math.min(100, Math.round((d.completed / d.total) * 100)) : 0; }
+function dlText(d) {
+  if (!d) return '';
+  if (d.state === 'queued') return 'Wartet – startet, sobald einer der 3 laufenden Downloads fertig ist';
+  if (d.state === 'running') return d.total ? `${dlPercent(d)} % · ${formatBytes(d.completed)} / ${formatBytes(d.total)}` : (d.status || 'Starte …');
+  if (d.state === 'done') return 'Fertig – in der Bibliothek';
+  if (d.state === 'cancelled') return 'Abgebrochen – „Erneut laden“ setzt fort';
+  if (d.state === 'error') return 'Fehler: ' + d.error;
+  return '';
+}
+const dlActive = () => [...dls.values()].filter((d) => d.state === 'queued' || d.state === 'running');
+async function startPull(name) {
+  const cur = dls.get(name);
+  if (cur && (cur.state === 'queued' || cur.state === 'running')) return hint('Dieses Modell wird schon geladen.');
+  dls.set(name, { name, state: 'queued', status: '', completed: 0, total: 0, error: '' });
+  dlEmit();
+  try {
+    const r = await api.models.download(name);
+    const d = dls.get(name);
+    if (d) {
+      d.state = r && r.aborted ? 'cancelled' : 'done';
+      if (d.state === 'done') d.completed = d.total;
     }
-    m.appendChild(el('h3', null, 'Neues Modell laden'));
-    const inl = el('div', 'inline');
-    const inp = el('input'); inp.type = 'text'; inp.placeholder = 'z. B. gpt-oss:20b';
-    const go = el('button', 'btn primary', 'Laden');
-    inl.append(inp, go);
-    m.appendChild(inl);
-    const sugg = el('div', 'chips-row');
-    for (const s of ['gpt-oss:20b', 'gemma4:12b']) {
-      const c = el('button', 'btn small', s); c.onclick = () => { inp.value = s; }; sugg.appendChild(c);
-    }
-    m.appendChild(sugg);
-    const prog = el('div', 'note', ''); prog.style.marginTop = '10px';
-    m.appendChild(prog);
-    if (m._offPull) m._offPull(); // beim Neuaufbau alten Listener entfernen
-    const off = api.ollama.onPull((p) => {
-      prog.textContent = p.total ? `${p.name}: ${p.status} – ${Math.round((p.completed / p.total) * 100)} % (${formatBytes(p.completed)} / ${formatBytes(p.total)})` : `${p.name}: ${p.status}`;
-    });
-    m._offPull = off;
-    go.onclick = async () => {
-      const name = inp.value.trim();
-      if (!name) return;
-      if (/cloud/i.test(name) && !confirm('Cloud-Modelle laufen NICHT lokal und senden Daten an fremde Server. Trotzdem laden?')) return;
-      go.disabled = true; go.textContent = 'Lädt …';
-      try {
-        const r = await api.ollama.pull(name);
-        if (r && r.aborted) { prog.textContent = 'Download abgebrochen.'; go.disabled = false; go.textContent = 'Laden'; return; }
-        await loadModels(); render(m);
-      } catch (e) { prog.textContent = 'Fehler: ' + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); go.disabled = false; go.textContent = 'Laden'; }
-    };
-    const act = el('div', 'actions');
-    const stop = el('button', 'btn', 'Download abbrechen'); stop.onclick = () => api.ollama.pullCancel();
-    const close = el('button', 'btn primary', 'Schließen'); close.onclick = () => { off(); m._offPull = null; closeModal(); };
-    act.append(stop, close);
-    m.appendChild(act);
+    if (!(r && r.aborted)) await loadModels();
+  } catch (e) {
+    const d = dls.get(name);
+    if (d) { d.state = 'error'; d.error = String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+  }
+  dlEmit();
+}
+function dlCancel(name) { api.models.cancel(name); }
+function dlDismiss(name) { if (name) dls.delete(name); else for (const [k, d] of dls) if (d.state !== 'queued' && d.state !== 'running') dls.delete(k); dlEmit(); }
+// Klick auf eine .gguf-Datei in huggingface.co (Erkunden): in die Download-Reihe
+api.hfweb.onDownload(({ name }) => { startPull(name); hint('Download eingereiht: ' + name, 6000); });
+api.hfweb.onNotice(({ text }) => hint(text, 6000));
+api.models.onState((st) => {
+  const d = dls.get(st.name);
+  if (!d) return;
+  if (st.state === 'queued' || st.state === 'running') { d.state = st.state; dlEmit(); }
+});
+api.models.onProgress((p) => {
+  const d = dls.get(p.name);
+  if (!d || (d.state !== 'running' && d.state !== 'queued')) return;
+  d.state = 'running';
+  d.status = p.status;
+  if (p.total) { d.total = p.total; d.completed = p.completed; }
+  dlEmit();
+});
+
+/** Eine Zeile je Download: Name, Balken, Stand, Abbrechen bzw. Erneut laden/Schließen. */
+function dlRow(d, { compact = false } = {}) {
+  const box = el('div', 'dl-item');
+  const head = el('div', 'dl-head');
+  const nm = el('div', compact ? 'dlw-name' : 'lc-name', d.name.replace(/^hf\.co\//, ''));
+  nm.title = d.name;
+  head.appendChild(nm);
+  if (!compact) head.appendChild(el('span', 'badge ' + (d.state === 'running' ? 'warn' : d.state === 'error' ? 'bad' : d.state === 'done' ? 'ok' : ''), { queued: 'Wartet', running: 'Lädt …', done: 'Fertig', cancelled: 'Abgebrochen', error: 'Fehler' }[d.state] || ''));
+  box.appendChild(head);
+  if (d.state === 'running' || d.state === 'queued') {
+    const bar = el('div', 'dl-bar'); const i = document.createElement('i');
+    i.style.width = (d.state === 'running' ? (d.total ? dlPercent(d) : 5) : 0) + '%';
+    bar.appendChild(i);
+    box.appendChild(bar);
+  }
+  box.appendChild(el('div', 'note', dlText(d)));
+  const row = el('div', 'dlw-row');
+  if (d.state === 'running' || d.state === 'queued') {
+    const b = el('button', 'btn small' + (compact ? '' : ' danger'), 'Abbrechen'); b.onclick = () => dlCancel(d.name); row.appendChild(b);
+  } else {
+    const o = el('button', 'btn small primary', d.state === 'done' ? 'Zur Bibliothek' : 'Erneut laden');
+    o.onclick = () => (d.state === 'done' ? (dlDismiss(d.name), showView('settings', 'library')) : startPull(d.name));
+    const x = el('button', 'btn small', 'Schließen'); x.onclick = () => dlDismiss(d.name);
+    row.append(o, x);
+  }
+  box.appendChild(row);
+  return box;
+}
+
+/** Kleine Download-Anzeige (Seitenleiste und Einstellungs-Navigation): alle laufenden und wartenden Downloads */
+function dlWidget() {
+  const box = el('div', 'dl-widget hidden');
+  const render = () => {
+    if (!box.isConnected && box.dataset.live) { off(); return; }
+    box.dataset.live = '1';
+    box.innerHTML = '';
+    box.classList.toggle('hidden', !dls.size);
+    if (!dls.size) return;
+    const act = dlActive();
+    const run = act.filter((d) => d.state === 'running').length;
+    if (dls.size > 1) box.appendChild(el('div', 'dlw-sum', act.length ? `Downloads: ${run} laufen${act.length > run ? `, ${act.length - run} warten` : ''}` : 'Downloads'));
+    for (const d of dls.values()) box.appendChild(dlRow(d, { compact: true }));
   };
-  openModal(render);
+  const off = dlOn(render);
+  render();
+  return box;
+}
+
+let pageCleanup = null;
+function showView(name, tab) {
+  if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; }
+  closeMenus();
+  const chat = name === 'chat';
+  $('viewChat').classList.toggle('hidden', !chat);
+  $('viewPage').className = 'view' + (chat ? ' hidden' : ' page-' + name);
+  $('btnSettings').classList.toggle('active', !chat && !/^(library|explore)$/.test(tab || ''));
+  setTimeout(panelSync, 0);
+  $('navChats').classList.toggle('active', chat);
+  $('navModels').classList.toggle('active', !chat && /^(library|explore)$/.test(tab || ''));
+  $('app').classList.toggle('in-settings', !chat);
+  if (chat) { $('input').focus(); return; }
+  showSettings(tab || 'general');
+}
+
+function modelsCtx() {
+  return {
+    api, hint, renderMd,
+    dls, dlOn, dlText, dlPercent, dlRow, startPull, dlCancel, dlDismiss,
+    models: () => state.models, refreshModels: loadModels,
+    useModel: async (n) => { $('modelSel').value = n; renderModelMenu(); await onModelChanged(true); showView('chat'); hint('Modell gewählt: ' + n); },
+    goTab: (id) => showView('settings', id),
+    currentModel: () => $('modelSel').value,
+  };
 }
 
 // ---------- Einstellungen ----------
 function showSettings(tab) {
+  const page = $('viewPage');
   openSettings({
     get settings() { return state.settings; },
     api,
+    mount: (build) => { if (pageCleanup) { try { pageCleanup(); } catch { /* egal */ } pageCleanup = null; } page.innerHTML = ''; const wrap = el('div', 'settings-page'); page.appendChild(wrap); build(wrap); },
+    explore: (root) => { pageCleanup = mountExplore(root, modelsCtx()); },
+    library: (root) => { pageCleanup = mountLibrary(root, modelsCtx()); },
+    close: () => showView('chat'),
+    dlWidget,
     apply: applyAppearance,
     hint, showProgress, hideProgress,
     onSaved: async (next) => {
       state.settings = next;
       applyAppearance(next);
-      renderProfileSelect(); renderGreeting(); renderTtsButton();
+      renderProfileSelect(); renderGreeting(); renderTtsButton(); updateCtxInfo();
       await refreshStatus(); await loadModels();
     },
     speakSample: (text, draft) => speakNow(text, draft),
@@ -771,30 +1089,63 @@ function toggleSidebar(open) {
 }
 
 function buildTemplateMenu() {
-  const menu = $('tplMenu');
-  menu.innerHTML = '';
-  menu.appendChild(el('div', 'menu-h', 'E-Mail- und Schreibhilfe'));
+  const list = $('tplList');
+  list.innerHTML = '';
   for (const [, label, prompt] of TEMPLATES) {
     const b = el('button', null, label);
+    b.type = 'button';
     b.onclick = () => {
       $('input').value = prompt + $('input').value;
-      autosize(); $('input').focus(); menu.classList.add('hidden');
+      autosize(); $('input').focus(); closeMenus();
     };
-    menu.appendChild(b);
+    list.appendChild(b);
   }
 }
 
+function closeMenus() {
+  for (const id of ['plusMenu', 'modelMenu']) $(id).classList.add('hidden');
+}
+function toggleMenu(id) {
+  const m = $(id);
+  const open = m.classList.contains('hidden');
+  closeMenus();
+  if (open) { m.classList.remove('hidden'); if (id === 'modelMenu') { $('modelFilter').value = ''; renderModelMenu(); $('modelFilter').focus(); } }
+}
+
+/** Kontext-Zähler unter dem Eingabefeld: so viele Tokens hat der Chat zuletzt gebraucht. */
+function updateCtxInfo() {
+  const msgs = (state.chat && state.chat.messages) || [];
+  let used = 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const st = msgs[i].stats;
+    if (msgs[i].role === 'assistant' && st && st.promptCount) { used = st.promptCount + (st.evalCount || 0); break; }
+  }
+  const max = state.settings.numCtx;
+  $('ctxInfo').textContent = used ? `Kontext: ${used.toLocaleString('de-DE')} von ${max.toLocaleString('de-DE')}` : '';
+  $('ctxInfo').classList.toggle('full', used > max * 0.85);
+}
+
 function wire() {
+  $('dlSide').appendChild(dlWidget());
   $('btnSend').onclick = send;
   $('btnStop').onclick = () => state.streaming && api.chat.stop(state.streaming.id);
   $('newChat').onclick = () => openChat(null);
-  $('btnSettings').onclick = () => showSettings('general');
-  $('btnModels').onclick = openModels;
+  $('btnSettings').onclick = () => showView('settings');
+  $('navChats').onclick = () => showView('chat');
+  $('navModels').onclick = () => showView('settings', 'library');
+  startMeters();
+  initPanel();
+  $('btnPlus').onclick = (e) => { e.stopPropagation(); toggleMenu('plusMenu'); };
+  $('modelBtn').onclick = (e) => { e.stopPropagation(); toggleMenu('modelMenu'); };
+  $('modelFilter').addEventListener('input', renderModelMenu);
+  $('modelMore').onclick = () => showView('settings', 'explore');
+  for (const id of ['plusMenu', 'modelMenu']) $(id).addEventListener('click', (e) => { if (e.target.closest('select,input')) e.stopPropagation(); });
+  $('btnAttach').addEventListener('click', closeMenus);
+  $('btnConv').addEventListener('click', closeMenus);
   $('btnAttach').onclick = pickFiles;
   $('btnMic').onclick = toggleMic;
   $('btnConv').onclick = toggleConv;
   $('btnExport').onclick = exportChat;
-  $('btnStopSpeak').onclick = stopAllSpeech;
   $('btnSidebar').onclick = () => toggleSidebar(false);
   $('btnSidebarOpen').onclick = () => toggleSidebar(true);
   $('chatSearch').oninput = (e) => { state.search = e.target.value; refreshChats(); };
@@ -803,9 +1154,7 @@ function wire() {
     renderTtsButton();
     if (!state.settings.ttsAuto) stopAllSpeech();
   };
-  $('btnTpl').onclick = (e) => { e.stopPropagation(); $('tplMenu').classList.toggle('hidden'); };
-  document.addEventListener('click', () => $('tplMenu').classList.add('hidden'));
-  $('modelSel').onchange = () => onModelChanged(true);
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) closeMenus(); });
   $('thinkSel').onchange = async () => { state.settings = await api.settings.set({ think: $('thinkSel').value }); };
   $('profileSel').onchange = async () => {
     state.settings = await api.settings.set({ activeProfile: $('profileSel').value });
@@ -823,6 +1172,7 @@ function wire() {
     e.preventDefault();
     for (const f of e.dataTransfer.files) await addFile(f.name, new Uint8Array(await f.arrayBuffer()));
   });
+  api.app.onClipImage((png) => addFile('Bild-' + Date.now() + '.png', new Uint8Array(png)));
   $('input').addEventListener('paste', async (e) => {
     const items = Array.from(e.clipboardData.items);
     // Enthält die Zwischenablage auch Text (z. B. aus Word oder Webseiten), wird ganz normal Text eingefügt.
@@ -834,27 +1184,29 @@ function wire() {
       }
     }
   });
-  $('overlay').addEventListener('mousedown', (e) => {
-    if (e.target === $('overlay') && !$('modal').classList.contains('wide')) closeModal();
-  });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!$('overlay').classList.contains('hidden')) closeModal();
-      else if (state.speaking) stopAllSpeech();
+      if (!$('plusMenu').classList.contains('hidden') || !$('modelMenu').classList.contains('hidden')) closeMenus();
+      else if (!$('viewChat').classList.contains('hidden')) { if (state.speaking) stopAllSpeech(); }
+      else showView('chat');
     }
   });
 }
 
 async function init() {
   state.settings = await api.settings.get();
+  api.app.info().then((i) => {
+    document.documentElement.classList.toggle('glass', !!i.glass);
+    document.documentElement.classList.toggle('mac', i.platform === 'darwin');
+  }).catch(() => {});
   applyAppearance(state.settings);
   applyIcons();
   buildTemplateMenu();
   renderProfileSelect();
   renderTtsButton();
+  renderMic();
   if (state.settings.sidebarOpen === false) toggleSidebar(false);
   wire();
-  api.app.onOllamaStart((r) => { if (r && r.started) { hint('Ollama wurde automatisch gestartet.'); refreshStatus().then(loadModels).catch(() => {}); } else if (r && !r.ok) hint('Ollama ließ sich nicht automatisch starten: ' + (r.error || ''), 0); });
   api.app.onTtsStart((r) => { if (r && r.started) hint('Stimmen-Server wurde gestartet.'); else if (r && !r.ok) hint('Stimmen-Server: ' + (r.error || 'nicht gestartet'), 0); });
   state.chat = newChat();
   await refreshStatus();

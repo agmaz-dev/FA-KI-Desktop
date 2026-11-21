@@ -21,4 +21,5 @@ await build({
 
 fs.copyFileSync(path.join(root, 'src', 'index.html'), path.join(out, 'index.html'));
 fs.copyFileSync(path.join(root, 'src', 'styles.css'), path.join(out, 'styles.css'));
+fs.copyFileSync(path.join(root, 'src', 'logo.svg'), path.join(out, 'logo.svg'));
 console.log('Renderer gebaut:', out);

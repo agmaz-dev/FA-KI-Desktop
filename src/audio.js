@@ -17,6 +17,7 @@ function encodeWav(samples, rate) {
   return buf;
 }
 
+let lastWavPeak = 0;
 async function blobToWav16k(blob) {
   const ctx = new AudioContext();
   const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
@@ -28,27 +29,37 @@ async function blobToWav16k(blob) {
   src.connect(off.destination);
   src.start();
   const rendered = await off.startRendering();
-  return encodeWav(rendered.getChannelData(0), rate);
+  const data = rendered.getChannelData(0);
+  // Leise Aufnahmen anheben: die Erkennung hört sonst nur Stille („[Musik]“).
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) { const a = Math.abs(data[i]); if (a > peak) peak = a; }
+  lastWavPeak = peak;
+  if (peak > 0.0005 && peak < 0.6) { const g = Math.min(40, 0.9 / peak); for (let i = 0; i < data.length; i++) data[i] *= g; }
+  return encodeWav(data, rate);
 }
 
 /**
  * Startet eine Aufnahme. Mit vad=true endet sie automatisch nach einer Sprechpause.
  * Gibt { stop(), cancel(), done } zurück; done liefert WAV-Bytes (16 kHz, mono) oder null (nichts gesprochen).
  */
-export async function startRecording({ vad = false, onLevel } = {}) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-  });
+export async function startRecording({ vad = false, onLevel, deviceId = '' } = {}) {
+  // Rauschunterdrückung und Echo-Filter von Chromium verschlucken bei manchen Mikrofonen die Sprache (dann hört die Erkennung nur „[Musik]“).
+  const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 };
+  if (deviceId) audio.deviceId = { exact: deviceId };
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio }); }
+  catch (e) { if (!deviceId) throw e; delete audio.deviceId; stream = await navigator.mediaDevices.getUserMedia({ audio }); } // gewähltes Mikrofon fehlt: Standard
   const rec = new MediaRecorder(stream);
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
 
   const ac = new AudioContext();
+  try { await ac.resume(); } catch { /* egal */ } // ohne resume() liefert die Pegelmessung evtl. nur Nullen
   const an = ac.createAnalyser();
   an.fftSize = 1024;
-  ac.createMediaStreamSource(stream).connect(an);
+  const src = ac.createMediaStreamSource(stream);
+  src.connect(an);
   const buf = new Float32Array(an.fftSize);
-
   let spoke = false;
   let lastVoice = Date.now();
   const started = Date.now();
@@ -61,6 +72,7 @@ export async function startRecording({ vad = false, onLevel } = {}) {
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const rms = Math.sqrt(sum / buf.length);
+    if (rms > handle.peak) handle.peak = rms;
     onLevel && onLevel(rms);
     if (rms > 0.02) { spoke = true; lastVoice = Date.now(); }
     if (vad) {
@@ -69,19 +81,42 @@ export async function startRecording({ vad = false, onLevel } = {}) {
       else if (!spoke && now - started > 9000) { cancelled = true; stop(); }
       else if (now - started > 120000) stop();
     }
-  }, 100);
+  }, 50);
 
   rec.onstop = async () => {
+    if (ended) return;
+    stopFired = true;
     clearInterval(timer);
     stream.getTracks().forEach((t) => t.stop());
     ac.close().catch(() => {});
-    if (cancelled || (vad && !spoke) || !chunks.length) return finish(null);
-    try { finish(await blobToWav16k(new Blob(chunks, { type: rec.mimeType }))); } catch { finish(null); }
+    if (cancelled || (vad && !spoke) || !chunks.length) { ended = true; return finish(null); }
+    try {
+      // Umwandeln darf nicht ewig hängen
+      const w = await Promise.race([blobToWav16k(new Blob(chunks, { type: rec.mimeType })), new Promise((_, rej) => setTimeout(() => rej(new Error('Zeit')), 15000))]);
+      if (lastWavPeak > handle.peak) handle.peak = lastWavPeak;
+      ended = true; finish(w);
+    } catch { hardEnd(true); }
   };
-  function stop() { if (rec.state !== 'inactive') rec.stop(); }
+  // Mikrofon auf jeden Fall freigeben: endet die Aufnahme nicht binnen 4 s, wird sie hart beendet
+  let ended = false;
+  let stopFired = false;
+  const hardEnd = (force) => {
+    if (ended || (stopFired && !force)) return;
+    ended = true;
+    clearInterval(timer);
+    stream.getTracks().forEach((t) => t.stop());
+    ac.close().catch(() => {});
+    finish(null);
+  };
+  function stop() {
+    if (rec.state !== 'inactive') { try { rec.stop(); } catch { hardEnd(); } }
+    setTimeout(hardEnd, 4000);
+  }
   function cancel() { cancelled = true; stop(); }
+  rec.onerror = () => hardEnd(true);
   rec.start(250);
-  return { stop, cancel, done };
+  const handle = { stop, cancel, done, peak: 0 };
+  return handle;
 }
 
 // ---------- Vorlesen ----------
@@ -146,11 +181,14 @@ function speakWindows(text, lang, rate, token) {
   });
 }
 
-function playBytes(bytes, token) {
+function playBytes(bytes, token, rate = 1) {
   return new Promise((resolve) => {
     if (token !== session) return resolve();
     const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = new Audio(url);
+    // Wiedergabegeschwindigkeit (Phonon): schneller/langsamer abspielen, Tonhöhe bleibt gleich.
+    a.preservesPitch = true;
+    a.playbackRate = Math.min(2, Math.max(0.5, Number(rate) || 1));
     let finished = false;
     const done = () => { if (!finished) { finished = true; URL.revokeObjectURL(url); resolve(); } };
     playing = { audio: a, done };
@@ -160,9 +198,20 @@ function playBytes(bytes, token) {
   });
 }
 
+/** Spielt fertige WAV-Bytes ab (z. B. Vorschau einer Stimme). Ein Stopp beendet auch das. */
+export async function playPreview(bytes, rate = 1, onState) {
+  stopSpeaking();
+  const token = session;
+  stateCb = onState || null;
+  onState && onState(true);
+  try { await playBytes(bytes, token, rate); } finally {
+    if (token === session) { playing = null; if (stateCb) { const cb = stateCb; stateCb = null; cb(false); } }
+  }
+}
+
 /**
  * Liest Markdown-Text vor. voicePref: 'auto' | 'de' | 'tr' | 'windows'.
- * Nutzt Piper (lokal, natürlich), sonst die Windows-Stimme. Jeder Stopp macht alles Laufende ungültig.
+ * Nutzt Phonon bzw. „Meine Stimme“ (lokal), sonst die System-Stimme. Jeder Stopp macht alles Laufende ungültig.
  */
 /** Schneidet den ersten Satz an einem Komma kurz, damit die Stimme früher anfängt. */
 function shortFirst(sentences) {
@@ -175,7 +224,10 @@ function shortFirst(sentences) {
   return [m[1], f.slice(m[1].length).trim(), ...sentences.slice(1)].filter(Boolean);
 }
 
-export async function speak(markdown, { voicePref = 'auto', speechStatus, speed = 1, engine = 'piper', serverLangs = 'all', onState, onWarn } = {}) {
+export async function speak(markdown, { voicePref = 'auto', speed = 1, engine = 'phonon', onState, onWarn } = {}) {
+  // Phonon erzeugt immer im normalen Tempo, die Geschwindigkeit gilt beim Abspielen.
+  const playRate = engine === 'phonon' ? speed : 1;
+  const synthSpeed = engine === 'phonon' ? 1 : speed;
   stopSpeaking();
   const token = session;
   await cancelP;
@@ -183,11 +235,11 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
   const plain = stripMarkdown(markdown);
   if (!plain) return;
   const lang = voicePref === 'de' || voicePref === 'tr' ? voicePref : detectLang(plain);
-  const trViaPiper = serverLangs === 'de' && lang === 'tr';
-  const serverMode = ((engine === 'server' && !trViaPiper) || engine === 'supertonic') && voicePref !== 'windows';
-  const piperOk = serverMode || (voicePref !== 'windows' && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]);
+  // Türkisch kann Phonon nicht: das liest die System-Stimme.
+  const serverMode = (engine === 'server' || engine === 'phonon') && voicePref !== 'windows' && lang !== 'tr';
+  const useSrv = serverMode;
   let warned = false;
-  const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed });
+  const synthOnce = (t) => window.api.speech.synthesize({ text: t, voice: lang, speed: synthSpeed });
   const synth = async (t) => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (token !== session) return null;
@@ -202,12 +254,12 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
     }
     return null;
   };
-  let sentences = splitSentences(plain, piperOk ? (serverMode ? 200 : 300) : 200);
+  let sentences = splitSentences(plain, useSrv ? (serverMode ? 200 : 300) : 200);
   if (serverMode) sentences = shortFirst(sentences);
   stateCb = onState || null;
   onState && onState(true);
   try {
-    if (piperOk) {
+    if (useSrv) {
       // Mehrere Sätze vorab erzeugen, während der aktuelle spricht (Server arbeitet sie nacheinander ab).
       const depth = serverMode ? 3 : 2;
       const jobs = [];
@@ -224,15 +276,10 @@ export async function speak(markdown, { voicePref = 'auto', speechStatus, speed 
         const cur = await jobs[i];
         if (token !== session) return;
         pump(i + depth);
-        if (cur) await playBytes(cur, token);
+        if (cur) await playBytes(cur, token, playRate);
         else {
-          let alt = null;
-          if (serverMode && speechStatus && speechStatus.piperBinary && speechStatus.voices[lang]) {
-            try { alt = await window.api.speech.synthesize({ text: sentences[i], voice: lang, speed, piper: true }); } catch { alt = null; }
-          }
           if (token !== session) return;
-          if (alt) await playBytes(alt, token);
-          else await speakWindows(sentences[i], lang, speed, token);
+          await speakWindows(sentences[i], lang, speed, token);
         }
         if (token !== session) return;
       }

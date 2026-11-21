@@ -7,8 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { detectLang, stripMarkdown, splitSentences, fitText, cleanTranscript } = require('../lib/util');
 const { Store } = require('../lib/store');
-const ollama = require('../lib/ollama');
-const { pickWhisperAsset } = require('../lib/speech');
+const { buildThink } = require('../lib/think');
 const { downloadFile } = require('../lib/downloader');
 
 test('Sprache erkennen', () => {
@@ -33,19 +32,10 @@ test('Text kürzen', () => {
   assert.ok(r.truncated && r.text.length < 300);
 });
 
-test('Whisper-Ausgabe säubern', () => {
+test('Diktat-Ausgabe säubern', () => {
   assert.strictEqual(cleanTranscript(' [BLANK_AUDIO] Hallo  Welt '), 'Hallo Welt');
-});
-
-test('Whisper-Paket auswählen', () => {
-  const a = pickWhisperAsset([
-    { name: 'whisper-cublas-12.4.0-bin-x64.zip', browser_download_url: 'u1' },
-    { name: 'whisper-bin-Win32.zip', browser_download_url: 'u2' },
-    { name: 'whisper-bin-x64.zip', browser_download_url: 'u3' },
-    { name: 'whisper-blas-bin-x64.zip', browser_download_url: 'u4' },
-  ]);
-  assert.strictEqual(a.url, 'u3');
-  assert.strictEqual(pickWhisperAsset([{ name: 'x.tar.gz', browser_download_url: 'z' }]), null);
+  assert.strictEqual(cleanTranscript('[Musik]'), '');
+  assert.strictEqual(cleanTranscript('(Applaus) Hallo [Musik] Welt ♪'), 'Hallo Welt');
 });
 
 test('Store: Chats & Einstellungen', () => {
@@ -61,38 +51,10 @@ test('Store: Chats & Einstellungen', () => {
   assert.strictEqual(s.listChats().length, 0);
 });
 
-test('Ollama: Streaming, Tags, Fehler, think', async () => {
-  const srv = http.createServer((req, res) => {
-    if (req.url === '/api/tags') { res.end(JSON.stringify({ models: [{ name: 'gpt-oss:20b', size: 5 }] })); return; }
-    if (req.url === '/api/version') { res.end('{"version":"0.0.1"}'); return; }
-    if (req.url === '/api/chat') {
-      let b = ''; req.on('data', (d) => { b += d; });
-      req.on('end', () => {
-        const j = JSON.parse(b);
-        if (j.model === 'bad') { res.statusCode = 404; res.end('{"error":"model not found"}'); return; }
-        res.write(JSON.stringify({ message: { thinking: 'hm' } }) + '\n');
-        res.write(JSON.stringify({ message: { content: 'Hal' } }) + '\n{"message":{"content":"lo"}}\n');
-        res.end(JSON.stringify({ done: true, eval_count: 2, eval_duration: 1e9 }));
-      });
-      return;
-    }
-    res.statusCode = 404; res.end('{}');
-  });
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-  assert.strictEqual(await ollama.version(base), '0.0.1');
-  assert.strictEqual((await ollama.tags(base))[0].name, 'gpt-oss:20b');
-  let text = ''; let think = ''; let done = null;
-  await ollama.chatStream(base, { model: 'x', messages: [] }, (o) => {
-    if (o.message) { text += o.message.content || ''; think += o.message.thinking || ''; }
-    if (o.done) done = o;
-  });
-  assert.strictEqual(text, 'Hallo'); assert.strictEqual(think, 'hm'); assert.strictEqual(done.eval_count, 2);
-  await assert.rejects(ollama.chatStream(base, { model: 'bad', messages: [] }, () => {}), /model not found/);
-  srv.close();
-  assert.strictEqual(ollama.buildThink('gpt-oss:20b', ['thinking'], 'high'), 'high');
-  assert.strictEqual(ollama.buildThink('qwen3', ['thinking'], 'off'), false);
-  assert.strictEqual(ollama.buildThink('gemma', ['completion'], 'high'), undefined);
+test('buildThink: Stufen und Ein/Aus je nach Modell', () => {
+  assert.strictEqual(buildThink('gpt-oss:20b', ['thinking'], 'high'), 'high');
+  assert.strictEqual(buildThink('qwen3', ['thinking'], 'off'), false);
+  assert.strictEqual(buildThink('gemma', ['completion'], 'high'), undefined);
 });
 
 test('Downloader', async () => {
@@ -106,7 +68,7 @@ test('Downloader', async () => {
   srv.close();
 });
 
-test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
+test('Stimmen-Server (OpenAI-kompatibel)', async () => {
   const { SpeechManager } = require('../lib/speech');
   let got = null;
   const srv = http.createServer((req, res) => {
@@ -120,19 +82,12 @@ test('Stimmen-Server (OpenAI-kompatibel) und Piper-Stimmenwahl', async () => {
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const url = `http://127.0.0.1:${srv.address().port}`;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-'));
-  const sm = new SpeechManager(dir);
-  const wav = await sm.synthesizeServer('Hallo', 'tr', { ttsServerUrl: url, ttsServerVoice: 'anna.wav', ttsServerVoiceTr: 'ben.wav' }, 1.2);
+  const sm = new SpeechManager();
+  const wav = await sm.synthesizeServer('Hallo', 'de', { ttsServerUrl: url, ttsServerVoice: 'anna.wav' }, 1.2);
   assert.strictEqual(wav.length, 8);
-  assert.strictEqual(got.voice, 'ben.wav'); assert.strictEqual(got.language, 'tr'); assert.strictEqual(got.speed, 1.2);
-  const v = await sm.serverVoices(url);
-  assert.ok(v.ok); assert.deepStrictEqual(v.voices, ['anna.wav', 'ben.wav']);
+  assert.strictEqual(got.voice, 'anna.wav'); assert.strictEqual(got.language, 'de'); assert.strictEqual(got.speed, 1.2);
+  void dir;
   srv.close();
-  fs.mkdirSync(sm.voiceDir, { recursive: true });
-  for (const id of ['tr_TR-fettah-medium', 'tr_TR-dfki-medium', 'de_DE-thorsten-medium', 'de_DE-thorsten-high']) {
-    fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx'), 'x'); fs.writeFileSync(path.join(sm.voiceDir, id + '.onnx.json'), '{}');
-  }
-  assert.strictEqual(sm.installedVoice('tr').id, 'tr_TR-dfki-medium');
-  assert.strictEqual(sm.installedVoice('de').id, 'de_DE-thorsten-high');
 });
 
 test('Word-Export erzeugt gültiges DOCX-Paket', () => {
@@ -145,13 +100,6 @@ test('Word-Export erzeugt gültiges DOCX-Paket', () => {
   assert.match(xml, /Heading1/);
   assert.match(xml, /&lt;b&gt;/);
   assert.ok(!/<b>x/.test(xml));
-});
-
-test('Piper: pavoque und dfki werden vor Thorsten bevorzugt', () => {
-  const { VOICES } = require('../lib/speech');
-  assert.strictEqual(VOICES.de.names[0], 'kerstin');
-  assert.deepStrictEqual(VOICES.de.names, ['kerstin']);
-  assert.strictEqual(VOICES.tr.names[0], 'dfki');
 });
 
 test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
@@ -173,165 +121,6 @@ test('OuteTTS-Einrichtung: Pfade, Startbefehl, Aufräumen', () => {
   assert.strictEqual(v.status().oldFiles, false);
 });
 
-test('Piper: zu neue Stimmen (Mehrzeichen-Laute) werden übersprungen', () => {
-  const fs = require('fs'); const os = require('os'); const path = require('path');
-  const { SpeechManager } = require('../lib/speech');
-  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-pv-'));
-  const vd = path.join(ud, 'voices'); fs.mkdirSync(vd, { recursive: true });
-  const put = (id, map) => { fs.writeFileSync(path.join(vd, id + '.onnx'), 'x'); fs.writeFileSync(path.join(vd, id + '.onnx.json'), JSON.stringify({ phoneme_id_map: map })); };
-  put('de_DE-kerstin-medium', { a: [1], 'aɪ': [161] });
-  put('de_DE-pavoque-low', { a: [1], b: [2] });
-  const s = new SpeechManager(ud, () => {}, ud);
-  assert.strictEqual(s.installedVoice('de').id, 'de_DE-pavoque-low');
-  put('de_DE-kerstin-low', { a: [1], b: [2] });
-  assert.strictEqual(s.installedVoice('de').id, 'de_DE-kerstin-low');
-});
-
-test('Supertonic: Text, Teilstücke, WAV', () => {
-  const st = require('../lib/supertonic');
-  assert.strictEqual(st.preprocessText('Hallo  Welt', 'de'), '<de>Hallo Welt.</de>');
-  assert.strictEqual(st.preprocessText('Merhaba!', 'tr'), '<tr>Merhaba!</tr>');
-  assert.throws(() => st.preprocessText('x', 'xx'));
-  const ch = st.chunkText('Eins ist da. ' + 'Zwei ist auch da. '.repeat(30), 100);
-  assert.ok(ch.length > 3 && ch.every((c) => c.length <= 120));
-  const w = st.wavBuffer(Float32Array.from([0, 0.5, -0.5]), 44100);
-  assert.strictEqual(w.toString('ascii', 0, 4), 'RIFF');
-  assert.strictEqual(w.readUInt32LE(24), 44100);
-  assert.strictEqual(w.length, 44 + 6);
-  assert.deepStrictEqual(Object.keys(st.VOICES), ['elena', 'tessa', 'caleb']);
-});
-
-test('Supertonic: Ablauf mit nachgebautem onnxruntime', async () => {
-  const { Supertonic, MODEL_FILES, VOICES } = require('../lib/supertonic');
-  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-st-'));
-  const calls = [];
-  class Tensor { constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; } }
-  const ort = {
-    Tensor,
-    InferenceSession: {
-      create: async (file) => ({
-        run: async (f) => {
-          const n = path.basename(file, '.onnx');
-          calls.push(n);
-          if (n === 'duration_predictor') { assert.strictEqual(f.text_ids.type, 'int64'); return { duration: { data: [1.0] } }; }
-          if (n === 'text_encoder') return { text_emb: new Tensor('float32', new Float32Array(4), [1, 2, 2]) };
-          if (n === 'vector_estimator') {
-            assert.ok(f.noisy_latent && f.latent_mask && f.total_step && f.current_step && f.text_emb);
-            return { denoised_latent: { data: f.noisy_latent.data } };
-          }
-          return { wav_tts: { data: new Float32Array(f.latent.dims[2] * 512 * 2).fill(0.1) } };
-        },
-      }),
-    },
-  };
-  const s = new Supertonic(ud, () => {}, ort);
-  assert.strictEqual(s.status().ready, false);
-  for (const f of MODEL_FILES) {
-    fs.mkdirSync(path.dirname(s.file(f)), { recursive: true });
-    fs.writeFileSync(s.file(f), f === 'onnx/tts.json' ? JSON.stringify({ ae: { sample_rate: 1000, base_chunk_size: 10 }, ttl: { chunk_compress_factor: 2, latent_dim: 3 } }) : f === 'onnx/unicode_indexer.json' ? JSON.stringify(Array.from({ length: 400 }, (_, i) => i)) : 'x');
-  }
-  fs.mkdirSync(path.join(s.dir, 'voice_styles'), { recursive: true });
-  fs.writeFileSync(path.join(s.dir, 'voice_styles', VOICES.elena.id + '.json'), JSON.stringify({ style_ttl: { data: [[[1, 2], [3, 4]]], dims: [1, 2, 2] }, style_dp: { data: [[[1, 2]]], dims: [1, 1, 2] } }));
-  assert.strictEqual(s.status().ready, true);
-  assert.strictEqual(s.hasVoice('tessa'), false);
-  await assert.rejects(s.synthesize('Hallo', 'de', 'tessa', 1, 2), /noch nicht geladen/);
-  const wav = await s.synthesize('Guten Tag. Wie geht es Dir?', 'de', 'elena', 1, 2);
-  assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
-  assert.strictEqual(wav.readUInt32LE(24), 1000);
-  assert.ok(wav.length > 44);
-  assert.ok(calls.includes('vocoder') && calls.filter((c) => c === 'vector_estimator').length >= 2);
-});
-
-test('Whisper-Ausgabe: Umlaut über Blockgrenze bleibt heil', async () => {
-  const { decodeChunks, run } = require('../lib/speech');
-  const buf = Buffer.from('Grüße aus München', 'utf8');
-  const i = buf.indexOf(0xc3);
-  assert.strictEqual(decodeChunks([buf.subarray(0, i + 1), buf.subarray(i + 1)]), 'Grüße aus München');
-  // Echter Kindprozess, der das „ü“ in zwei getrennten Schreibvorgängen ausgibt
-  const script = "const b=Buffer.from('Grüße','utf8');process.stdout.write(b.subarray(0,3));setTimeout(()=>process.stdout.write(b.subarray(3)),60);";
-  const { out } = await run(process.execPath, ['-e', script], { timeoutMs: 10000 });
-  assert.strictEqual(out, 'Grüße');
-});
-
-test('Supertonic: Stopp verwirft laufende und wartende Sätze', async () => {
-  const { Supertonic, MODEL_FILES, VOICES } = require('../lib/supertonic');
-  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-stc-'));
-  const calls = [];
-  class Tensor { constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; } }
-  const ort = {
-    Tensor,
-    InferenceSession: {
-      create: async (file) => ({
-        run: async (f) => {
-          const n = path.basename(file, '.onnx');
-          calls.push(n);
-          await new Promise((r) => setTimeout(r, 10));
-          if (n === 'duration_predictor') return { duration: { data: [1.0] } };
-          if (n === 'text_encoder') return { text_emb: new Tensor('float32', new Float32Array(4), [1, 2, 2]) };
-          if (n === 'vector_estimator') return { denoised_latent: { data: f.noisy_latent.data } };
-          return { wav_tts: { data: new Float32Array(f.latent.dims[2] * 512 * 2).fill(0.1) } };
-        },
-      }),
-    },
-  };
-  const s = new Supertonic(ud, () => {}, ort);
-  for (const f of MODEL_FILES) {
-    fs.mkdirSync(path.dirname(s.file(f)), { recursive: true });
-    fs.writeFileSync(s.file(f), f === 'onnx/tts.json' ? JSON.stringify({ ae: { sample_rate: 1000, base_chunk_size: 10 }, ttl: { chunk_compress_factor: 2, latent_dim: 3 } }) : f === 'onnx/unicode_indexer.json' ? JSON.stringify(Array.from({ length: 400 }, (_, i) => i)) : 'x');
-  }
-  fs.mkdirSync(path.join(s.dir, 'voice_styles'), { recursive: true });
-  fs.writeFileSync(path.join(s.dir, 'voice_styles', VOICES.elena.id + '.json'), JSON.stringify({ style_ttl: { data: [[[1, 2], [3, 4]]], dims: [1, 2, 2] }, style_dp: { data: [[[1, 2]]], dims: [1, 1, 2] } }));
-  // Drei vorab angestoßene Sätze (wie beim Vorlesen), dann Stopp mitten im ersten
-  const jobs = ['Erster Satz.', 'Zweiter Satz.', 'Dritter Satz.'].map((t) => s.synthesize(t, 'de', 'elena', 1, 8));
-  while (!calls.includes('vector_estimator')) await new Promise((r) => setTimeout(r, 2));
-  s.cancel();
-  const res = await Promise.allSettled(jobs);
-  assert.ok(res.every((r) => r.status === 'rejected' && /abgebrochen/.test(r.reason.message)));
-  assert.strictEqual(calls.filter((c) => c === 'duration_predictor').length, 1, 'wartende Sätze dürfen nicht starten');
-  assert.ok(!calls.includes('vocoder'), 'abgebrochener Satz darf nicht fertig gerechnet werden');
-  assert.ok(calls.filter((c) => c === 'vector_estimator').length < 8);
-  // Nach dem Stopp funktioniert neues Vorlesen wieder
-  const wav = await s.synthesize('Neu.', 'de', 'elena', 1, 2);
-  assert.strictEqual(wav.toString('ascii', 0, 4), 'RIFF');
-});
-
-test('Ollama: Fehler mitten im Stream schließt die Verbindung, Abbruch und Umlaut-Grenze', async () => {
-  let closed = false;
-  const srv = http.createServer((req, res) => {
-    let b = ''; req.on('data', (d) => { b += d; });
-    req.on('end', () => {
-      const j = JSON.parse(b);
-      if (j.model === 'split') {
-        const s = Buffer.from(JSON.stringify({ message: { content: 'Grüße' } }) + '\n');
-        const i = s.indexOf(0xc3);
-        res.write(s.subarray(0, i + 1));
-        setTimeout(() => { res.write(s.subarray(i + 1)); res.end(JSON.stringify({ done: true })); }, 30);
-        return;
-      }
-      res.write(JSON.stringify({ message: { content: 'a' } }) + '\n');
-      if (j.model === 'err') res.write(JSON.stringify({ error: 'out of memory' }) + '\n');
-      const t = setInterval(() => res.write(JSON.stringify({ message: { content: 'x' } }) + '\n'), 20);
-      res.on('close', () => { clearInterval(t); closed = true; });
-    });
-  });
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
-  let text = '';
-  await ollama.chatStream(base, { model: 'split', messages: [] }, (o) => { if (o.message) text += o.message.content; });
-  assert.strictEqual(text, 'Grüße');
-  await assert.rejects(ollama.chatStream(base, { model: 'err', messages: [] }, () => {}), /out of memory/);
-  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(closed, 'Verbindung muss nach Fehlerzeile geschlossen werden');
-  closed = false;
-  const c = new AbortController();
-  setTimeout(() => c.abort(), 80);
-  await assert.rejects(ollama.chatStream(base, { model: 'slow', messages: [] }, () => {}, c.signal));
-  assert.ok(c.signal.aborted);
-  for (let i = 0; i < 50 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
-  assert.ok(closed, 'Abbruch muss die Verbindung schließen');
-  srv.close();
-});
-
 test('Türkisch-Wörter mit ç/ğ und Satzteile höchstens maxLen', () => {
   assert.strictEqual(detectLang('Bu kitap çok güzel ve ben de var'), 'tr');
   assert.strictEqual(detectLang('Das ist ein ganz normaler deutscher Satz mit ne Menge Wörter.'), 'de');
@@ -340,60 +129,6 @@ test('Türkisch-Wörter mit ç/ğ und Satzteile höchstens maxLen', () => {
     assert.ok(parts.every((p) => p.length <= 280), JSON.stringify(parts.map((p) => p.length)));
     assert.strictEqual(parts.join('').replace(/\s/g, '').length, t.replace(/\s/g, '').length);
   }
-});
-
-test('Whisper: Audio-Kontext passend zur Aufnahmelänge', () => {
-  const { audioCtxFor, wavSeconds } = require('../lib/speech');
-  assert.strictEqual(audioCtxFor(2), 768);
-  assert.strictEqual(audioCtxFor(11), 768);
-  assert.ok(audioCtxFor(20) >= (20 + 2.5) * 50);
-  assert.strictEqual(audioCtxFor(29), 0);
-  assert.strictEqual(audioCtxFor(0), 0);
-  assert.strictEqual(wavSeconds(Buffer.alloc(44 + 32000 * 3)), 3);
-});
-
-test('Whisper-Server: bleibt geladen, Umlaute heil, Rückfall auf CLI', { skip: process.platform === 'win32' }, async () => {
-  const { SpeechManager } = require('../lib/speech');
-  const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ws-'));
-  const bundled = path.join(ud, 'bundled');
-  fs.mkdirSync(path.join(bundled, 'whisper'), { recursive: true });
-  const log = path.join(ud, 'spawns.log');
-  // Nachgebauter whisper-server: zählt Starts, antwortet mit „Grüße“, Mehrbyte-Zeichen über zwei Pakete verteilt
-  const fake = path.join(bundled, 'whisper', 'whisper-server');
-  fs.writeFileSync(fake, `#!${process.execPath}
-const http = require('http'); const fs = require('fs');
-const a = process.argv; const port = Number(a[a.indexOf('--port') + 1]);
-fs.appendFileSync(${JSON.stringify(log)}, 'start\\n');
-http.createServer((req, res) => {
-  if (req.url === '/health') return res.end('{"status":"ok"}');
-  let b = []; req.on('data', (d) => b.push(d)); req.on('end', () => {
-    const body = Buffer.concat(b).toString('latin1');
-    fs.appendFileSync(${JSON.stringify(log)}, (/name="audio_ctx"\\r\\n\\r\\n(\\d+)/.exec(body) || [])[1] + ' ' + (/name="language"\\r\\n\\r\\n(\\w+)/.exec(body) || [])[1] + '\\n');
-    const out = Buffer.from(JSON.stringify({ text: ' Grüße aus München' }), 'utf8');
-    const i = out.indexOf(0xc3);
-    res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Length', out.length);
-    res.write(out.subarray(0, i + 1)); setTimeout(() => res.end(out.subarray(i + 1)), 30);
-  });
-}).listen(port, '127.0.0.1');
-`);
-  fs.chmodSync(fake, 0o755);
-  const sm = new SpeechManager(ud, () => {}, bundled);
-  fs.mkdirSync(path.dirname(sm.whisperModelPath('small')), { recursive: true });
-  fs.writeFileSync(sm.whisperModelPath('small'), 'x');
-  try {
-    const wav = Buffer.alloc(44 + 32000 * 3);
-    assert.strictEqual(await sm.transcribe(wav, 'de', 'small'), 'Grüße aus München');
-    assert.strictEqual(sm.lastTiming.path, 'server');
-    assert.strictEqual(await sm.transcribe(wav, 'de', 'small'), 'Grüße aus München');
-    const lines = fs.readFileSync(log, 'utf8').trim().split('\n');
-    assert.strictEqual(lines.filter((l) => l === 'start').length, 1, 'Modell darf nur einmal geladen werden');
-    assert.ok(lines.includes('768 de'));
-  } finally {
-    sm.stopWhisperServer();
-  }
-  // Ohne Server und ohne CLI: klare Meldung
-  fs.unlinkSync(fake);
-  await assert.rejects(sm.transcribe(Buffer.alloc(44 + 32000), 'de', 'small'), /nicht eingerichtet/);
 });
 
 test('Downloader: Schreibfehler wird gemeldet statt abzustürzen', async () => {
@@ -413,4 +148,19 @@ test('Prozesse: fehlendes Programm wird sofort gemeldet', async () => {
   await new Promise((r) => setTimeout(r, 300));
   assert.ok(child.spawnError && child.spawnError.code === 'ENOENT');
   assert.strictEqual(await p.freePort('http://127.0.0.1:8004'), false); // ohne eigenen Ordner wird nie etwas beendet
+});
+
+test('parseGpuMac liest die Apple-GPU-Auslastung', () => {
+  const { parseGpuMac } = require('../lib/sysstats');
+  assert.strictEqual(parseGpuMac('"PerformanceStatistics" = {"Device Utilization %"=37,"Renderer Utilization %"=10}'), 37);
+  assert.strictEqual(parseGpuMac('nichts'), null);
+});
+test('hwFor: Mac nutzt gemeinsamen Speicher, Windows die Einstellung', () => {
+  const hf = require('../lib/hf');
+  const GIB = 1024 ** 3;
+  assert.deepStrictEqual(hf.hwFor({ vramGb: 16, ramGb: 32 }, 'win32', 32 * GIB), { vramGb: 16, ramGb: 32 });
+  const m = hf.hwFor({}, 'darwin', 16 * GIB);
+  assert.ok(m.vramGb > 8 && m.vramGb < 11 && m.ramGb === 0);
+  assert.strictEqual(hf.fitFor(14 * GIB, m).fit, 'nein');
+  assert.strictEqual(hf.fitFor(5 * GIB, m).fit, 'gpu');
 });
